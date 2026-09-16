@@ -1,0 +1,659 @@
+"""Ties audio capture, DSP, color mapping, and lamp control together.
+
+Deliberately split into two independent ticks, driven by two independently
+configurable rates (see config.schema.AudioConfig.analysis_update_hz and
+config.schema.NetworkConfig.visual_update_hz):
+
+- `tick_analysis()`: pulls the latest audio window and computes one FFT
+  frame. Cheap (a 2048-point real FFT is sub-millisecond), mode-agnostic.
+- `tick_visual()`: reads the latest FFT frame, extracts whatever
+  bands/features the current color mode needs, applies attack/release
+  smoothing, runs the color mapping, applies per-lamp effects (including a
+  temporal/phase offset via a short history buffer), and finally hands the
+  per-lamp target colors to the LampManager.
+
+The LampManager's own per-lamp worker threads then independently rate-limit
+actual network sends to `lamp_command_rate_hz` and drop unchanged updates -
+so this class never needs to know or care about lamp command pacing.
+
+Both ticks are cheap enough to run on Qt's own timer/event loop without
+blocking the UI; the only actually blocking work (LAN sockets) happens on
+the LampManager's dedicated worker threads.
+"""
+from __future__ import annotations
+
+import collections
+import logging
+import math
+import random
+import threading
+import time
+from typing import Deque, Dict, Optional, Tuple
+
+import numpy as np
+
+from ..audio.capture import AudioCapture
+from ..color.mapping import ColorMappingEngine, apply_per_lamp_effect
+from ..color.models import Color, WhiteTarget, clip, lerp
+from ..config.schema import AppConfig
+from ..diagnostics.metrics import RateCounter
+from ..dsp.bands import band_energies, band_energy, spectral_centroid_hz, spectral_contrast
+from ..dsp.beat_detector import BeatDetector
+from ..effects.chase import ChaseAnimator, get_chase_group_dwell_weights, get_chase_groups
+from ..dsp.fft_engine import FFTEngine, SpectrumFrame
+from ..dsp.smoothing import AttackReleaseSmoother, HueSmoother, MultiSmoother
+from ..lamps.manager import LampManager
+
+logger = logging.getLogger("airam_lights.engine")
+
+
+class TimeSeriesBuffer:
+    """Small history of (timestamp, vector) samples, used to implement the
+    optional per-lamp temporal/phase offset via linear interpolation."""
+
+    def __init__(self, max_age_s: float = 2.0):
+        self.max_age_s = max_age_s
+        self._entries: Deque[Tuple[float, np.ndarray]] = collections.deque()
+
+    def push(self, t: float, values: np.ndarray) -> None:
+        self._entries.append((t, np.array(values, dtype=float)))
+        cutoff = t - self.max_age_s
+        while self._entries and self._entries[0][0] < cutoff:
+            self._entries.popleft()
+
+    def sample_at(self, t: float) -> Optional[np.ndarray]:
+        if not self._entries:
+            return None
+        if t <= self._entries[0][0]:
+            return self._entries[0][1]
+        if t >= self._entries[-1][0]:
+            return self._entries[-1][1]
+        prev = self._entries[0]
+        for entry in self._entries:
+            if entry[0] >= t:
+                t1, v1 = prev
+                t2, v2 = entry
+                if t2 <= t1:
+                    return v2
+                frac = (t - t1) / (t2 - t1)
+                return v1 + (v2 - v1) * frac
+            prev = entry
+        return self._entries[-1][1]
+
+
+class VisualizationEngine:
+    def __init__(self, config: AppConfig, audio: AudioCapture, lamp_manager: LampManager):
+        self.config = config
+        self.audio = audio
+        self.lamp_manager = lamp_manager
+
+        self.fft = FFTEngine(audio.samplerate, config.audio.fft_size)
+        self.color_engine = ColorMappingEngine(config.color_mapping)
+
+        sm = config.color_mapping.smoothing
+        self._smoother_r = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
+        self._smoother_g = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
+        self._smoother_b = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
+        self._smoother_log_centroid = AttackReleaseSmoother(sm.attack_ms, sm.release_ms, initial=math.log(200))
+        self._smoother_value = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
+        self._smoother_contrast = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
+        self._smoother_bands8 = MultiSmoother(len(config.bands_8), sm.attack_ms, sm.release_ms)
+
+        self._history_3 = TimeSeriesBuffer()
+        self._history_8 = TimeSeriesBuffer()
+        self._history_beat = TimeSeriesBuffer()
+        self._history_peak = TimeSeriesBuffer()
+
+        bs = config.color_mapping.beat_sync
+        self._beat_detector = BeatDetector(
+            sensitivity=bs.sensitivity, min_interval_ms=bs.min_interval_ms, min_energy=bs.min_energy
+        )
+        self._beat_target_hue = random.uniform(0.0, 360.0)
+        self._beat_hue_cursor = self._beat_target_hue
+        self._hue_smoother_beat = HueSmoother(bs.hue_attack_ms, initial=self._beat_target_hue)
+        self._smoother_beat_value = AttackReleaseSmoother(bs.brightness_attack_ms, bs.brightness_release_ms)
+        self._beat_dark_until: Optional[float] = None  # set while a dark-pulse pause is pending/active
+        self.last_beat_time: Optional[float] = None
+
+        pf = config.color_mapping.peak_flash
+        self._peak_detector = BeatDetector(
+            sensitivity=pf.sensitivity, min_interval_ms=pf.min_interval_ms, min_energy=pf.min_energy
+        )
+        self._hue_drift_deg = random.uniform(0.0, 360.0)
+        self._hue_smoother_peak = HueSmoother(pf.hue_flow_ms, initial=self._hue_drift_deg)
+        self._white_smoother = AttackReleaseSmoother(pf.white_attack_ms, pf.white_release_ms)
+        self._loudness_smoother = AttackReleaseSmoother(pf.loudness_smoothing_ms, pf.loudness_smoothing_ms)
+        self._flash_value_smoother = AttackReleaseSmoother(pf.flash_attack_ms, pf.flash_release_ms)
+        self._hue_random_offset = 0.0  # persistent, only changes on a qualifying peak (see randomness)
+        self.last_peak_time: Optional[float] = None
+
+        bsw = config.color_mapping.beat_sync_white
+        self._beat_detector_white = BeatDetector(
+            sensitivity=bsw.sensitivity, min_interval_ms=bsw.min_interval_ms, min_energy=bsw.min_energy
+        )
+        self._beat_white_target_temp = random.uniform(bsw.temp_min, bsw.temp_max)
+        self._temp_smoother_beat_white = AttackReleaseSmoother(bsw.temp_attack_ms, initial=self._beat_white_target_temp)
+        self._smoother_beat_white_value = AttackReleaseSmoother(bsw.brightness_attack_ms, bsw.brightness_release_ms)
+        self._beat_white_dark_until: Optional[float] = None
+        self._history_beat_white = TimeSeriesBuffer()
+        self.last_beat_time_white: Optional[float] = None
+
+        self._chase_animator = ChaseAnimator(config.chase)
+
+        self.running = False
+        self._raw_lock = threading.Lock()
+        self._raw_frame: Optional[SpectrumFrame] = None
+        self._last_visual_time: Optional[float] = None
+
+        self.rate_counter_analysis = RateCounter()
+        self.rate_counter_visual = RateCounter()
+
+        # Latest results, read by the UI for display purposes only.
+        self.latest_frame: Optional[SpectrumFrame] = None
+        self.latest_band3_levels: Dict[str, float] = {}
+        self.latest_band8_levels: list = [0.0] * len(config.bands_8)
+        self.latest_lamp_colors: Dict[str, Color] = {}
+        self.latest_lamp_white_targets: Dict[str, WhiteTarget] = {}  # actual DP targets for beat_sync_white mode
+
+    # -- configuration -----------------------------------------------------------
+
+    def apply_config(self, config: AppConfig) -> None:
+        self.config = config
+        self.color_engine.update_config(config.color_mapping)
+        self._apply_smoothing_settings()
+        if len(self._smoother_bands8.values) != len(config.bands_8):
+            self._smoother_bands8 = MultiSmoother(
+                len(config.bands_8), config.color_mapping.smoothing.attack_ms, config.color_mapping.smoothing.release_ms
+            )
+
+    def _apply_smoothing_settings(self) -> None:
+        sm = self.config.color_mapping.smoothing
+        for s in (
+            self._smoother_r,
+            self._smoother_g,
+            self._smoother_b,
+            self._smoother_log_centroid,
+            self._smoother_value,
+            self._smoother_contrast,
+        ):
+            s.attack_ms = sm.attack_ms
+            s.release_ms = sm.release_ms
+        self._smoother_bands8.attack_ms = sm.attack_ms
+        self._smoother_bands8.release_ms = sm.release_ms
+
+        bs = self.config.color_mapping.beat_sync
+        self._beat_detector.sensitivity = bs.sensitivity
+        self._beat_detector.min_interval_ms = bs.min_interval_ms
+        self._beat_detector.min_energy = bs.min_energy
+        self._hue_smoother_beat.time_constant_ms = bs.hue_attack_ms
+        self._smoother_beat_value.attack_ms = bs.brightness_attack_ms
+        self._smoother_beat_value.release_ms = bs.brightness_release_ms
+
+        pf = self.config.color_mapping.peak_flash
+        self._peak_detector.sensitivity = pf.sensitivity
+        self._peak_detector.min_interval_ms = pf.min_interval_ms
+        self._peak_detector.min_energy = pf.min_energy
+        self._hue_smoother_peak.time_constant_ms = pf.hue_flow_ms
+        self._white_smoother.attack_ms = pf.white_attack_ms
+        self._white_smoother.release_ms = pf.white_release_ms
+        self._loudness_smoother.attack_ms = pf.loudness_smoothing_ms
+        self._loudness_smoother.release_ms = pf.loudness_smoothing_ms
+        self._flash_value_smoother.attack_ms = pf.flash_attack_ms
+        self._flash_value_smoother.release_ms = pf.flash_release_ms
+
+        bsw = self.config.color_mapping.beat_sync_white
+        self._beat_detector_white.sensitivity = bsw.sensitivity
+        self._beat_detector_white.min_interval_ms = bsw.min_interval_ms
+        self._beat_detector_white.min_energy = bsw.min_energy
+        self._temp_smoother_beat_white.time_constant_ms = bsw.temp_attack_ms
+        self._smoother_beat_white_value.attack_ms = bsw.brightness_attack_ms
+        self._smoother_beat_white_value.release_ms = bsw.brightness_release_ms
+
+        self._chase_animator.update_config(self.config.chase)
+
+        self.lamp_manager.set_network_config(self.config.network, sm.min_change_threshold)
+
+    def start(self) -> None:
+        self.running = True
+        self._last_visual_time = None
+        logger.info("Visualization engine started (mode=%s)", self.config.color_mapping.mode)
+
+    def stop(self) -> None:
+        self.running = False
+        logger.info("Visualization engine stopped")
+
+    # -- fast tick: audio -> FFT only -----------------------------------------------
+
+    def tick_analysis(self) -> None:
+        if not self.running or not self.audio.has_data():
+            return
+        samples = self.audio.read_latest(self.config.audio.fft_size)
+        self.fft.set_samplerate(self.audio.samplerate)
+        frame = self.fft.compute(samples)
+        with self._raw_lock:
+            self._raw_frame = frame
+        self.latest_frame = frame
+        self.rate_counter_analysis.tick()
+
+    # -- slower tick: bands -> smoothing -> color -> lamps ----------------------------
+
+    def tick_visual(self) -> None:
+        if not self.running:
+            return
+        with self._raw_lock:
+            frame = self._raw_frame
+        if frame is None:
+            return
+
+        now = time.perf_counter()
+        dt = now - self._last_visual_time if self._last_visual_time else 1.0 / max(self.config.network.visual_update_hz, 1.0)
+        self._last_visual_time = now
+        self.rate_counter_visual.tick()
+        wall_now = time.time()
+
+        selected_ids = self.lamp_manager.selected_device_ids()
+        if not selected_ids:
+            self.latest_lamp_colors = {}
+            return
+
+        mode = self.config.color_mapping.mode
+
+        if mode == "beat_sync_white":
+            # A different physical DP (brightness+temp, work_mode='white')
+            # than every other mode (RGB colour DP) - handled as its own
+            # branch with its own push path. The RGB Chase overlay doesn't
+            # apply here (it operates on hue/saturation, meaningless for a
+            # white-balance value); WhiteChaseAnimator is a separate effect
+            # used by the standalone manual app instead.
+            white_targets, preview_colors = self._tick_beat_sync_white_mode(frame, dt, wall_now, selected_ids)
+            self.latest_lamp_white_targets = white_targets
+            self.latest_lamp_colors = preview_colors  # UI-swatch approximation only
+            if white_targets:
+                self.lamp_manager.push_white_targets(white_targets)
+            return
+
+        colors: Dict[str, Color] = {}
+
+        if mode in ("rgb_freq", "custom"):
+            colors = self._tick_rgb_modes(frame, dt, wall_now, selected_ids, mode)
+        elif mode == "hsv_music":
+            colors = self._tick_hsv_mode(frame, dt, wall_now, selected_ids)
+        elif mode == "8band_spectrum":
+            colors = self._tick_spectrum_mode(frame, dt, wall_now, selected_ids)
+        elif mode == "beat_sync":
+            colors = self._tick_beat_sync_mode(frame, dt, wall_now, selected_ids)
+        elif mode == "peak_flash":
+            colors = self._tick_peak_flash_mode(frame, dt, wall_now, selected_ids)
+        else:
+            logger.warning("Unknown color mapping mode '%s'", mode)
+
+        if colors and self.config.chase.enabled:
+            colors = self._apply_chase_overlay(colors, frame, dt, wall_now, selected_ids)
+
+        self.latest_lamp_colors = colors
+        self.latest_lamp_white_targets = {}
+        if colors:
+            self.lamp_manager.push_colors(colors)
+
+    # -- per-mode implementations ---------------------------------------------------
+
+    def _tick_rgb_modes(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids, mode: str) -> Dict[str, Color]:
+        cfg = self.config.color_mapping.rgb if mode == "rgb_freq" else self.config.color_mapping.custom
+
+        lvl_r = band_energy(frame, cfg.r.low_hz, cfg.r.high_hz)
+        lvl_g = band_energy(frame, cfg.g.low_hz, cfg.g.high_hz)
+        lvl_b = band_energy(frame, cfg.b.low_hz, cfg.b.high_hz)
+
+        sr = self._smoother_r.update(lvl_r, dt)
+        sg = self._smoother_g.update(lvl_g, dt)
+        sb = self._smoother_b.update(lvl_b, dt)
+        self.latest_band3_levels = {"R": sr, "G": sg, "B": sb}
+        self._history_3.push(wall_now, np.array([sr, sg, sb]))
+
+        colors: Dict[str, Color] = {}
+        for device_id in selected_ids:
+            effect = self.config.per_lamp_effects.get(device_id)
+            sample_t = wall_now - ((effect.phase_offset_ms / 1000.0) if effect else 0.0)
+            vals = self._history_3.sample_at(sample_t)
+            if vals is None:
+                vals = np.array([sr, sg, sb])
+            mult = effect.sensitivity_mult if effect else 1.0
+            mult_r = mult * (effect.band_gains.get("R", 1.0) if effect else 1.0)
+            mult_g = mult * (effect.band_gains.get("G", 1.0) if effect else 1.0)
+            mult_b = mult * (effect.band_gains.get("B", 1.0) if effect else 1.0)
+            color = self.color_engine.compute_rgb(vals[0], vals[1], vals[2], cfg, mult_r, mult_g, mult_b)
+            if effect:
+                color = apply_per_lamp_effect(color, effect)
+            colors[device_id] = color
+        return colors
+
+    def _tick_hsv_mode(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids) -> Dict[str, Color]:
+        centroid = spectral_centroid_hz(frame)
+        log_c = self._smoother_log_centroid.update(math.log(max(centroid, 1.0)), dt)
+        centroid_s = math.exp(log_c)
+
+        overall = band_energy(frame, 20, 16000)
+        value_s = self._smoother_value.update(overall, dt)
+
+        contrast = spectral_contrast(frame)
+        contrast_s = self._smoother_contrast.update(contrast, dt)
+
+        self.latest_band3_levels = {"centroid_hz": centroid_s, "value": value_s, "contrast": contrast_s}
+        self._history_3.push(wall_now, np.array([centroid_s, value_s, contrast_s]))
+
+        colors: Dict[str, Color] = {}
+        for device_id in selected_ids:
+            effect = self.config.per_lamp_effects.get(device_id)
+            sample_t = wall_now - ((effect.phase_offset_ms / 1000.0) if effect else 0.0)
+            vals = self._history_3.sample_at(sample_t)
+            if vals is None:
+                vals = np.array([centroid_s, value_s, contrast_s])
+            mult = effect.sensitivity_mult if effect else 1.0
+            color = self.color_engine.compute_hsv(vals[0], vals[1] * mult, vals[2])
+            if effect:
+                color = apply_per_lamp_effect(color, effect)
+            colors[device_id] = color
+        return colors
+
+    def _tick_spectrum_mode(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids) -> Dict[str, Color]:
+        bands = self.config.bands_8
+        raw_levels = np.array(band_energies(frame, bands))
+        smoothed = self._smoother_bands8.update(raw_levels, dt)
+        self.latest_band8_levels = list(smoothed)
+        self._history_8.push(wall_now, smoothed)
+
+        colors: Dict[str, Color] = {}
+        auto_index = 0
+        for device_id in selected_ids:
+            effect = self.config.per_lamp_effects.get(device_id)
+            if effect is not None and effect.band_index is not None:
+                band_idx = effect.band_index % len(bands)
+            else:
+                band_idx = auto_index % len(bands)
+                auto_index += 1
+
+            sample_t = wall_now - ((effect.phase_offset_ms / 1000.0) if effect else 0.0)
+            vals = self._history_8.sample_at(sample_t)
+            level = float(vals[band_idx]) if vals is not None else float(smoothed[band_idx])
+
+            mult = effect.sensitivity_mult if effect else 1.0
+            if effect is not None:
+                mult *= effect.band_gains.get(bands[band_idx].name, 1.0)
+
+            color = self.color_engine.compute_band_color(level * mult, band_idx)
+            if effect is not None:
+                color = apply_per_lamp_effect(color, effect)
+            colors[device_id] = color
+        return colors
+
+    def _tick_beat_sync_mode(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids) -> Dict[str, Color]:
+        """On every detected beat: snap to a fresh, fully-saturated hue at
+        full brightness. Between beats: hold the hue and let brightness decay
+        toward a dim baseline (a classic percussive attack/decay envelope) -
+        this is what makes the rhythm visually obvious, unlike the smoothly
+        continuous blending the other modes use.
+
+        Optionally, a random subset of beats first get a brief "dark pulse"
+        (a rhythm-synced pause toward black) before the flash actually
+        happens - a real-time system can only react to a beat as it occurs,
+        not anticipate one, so the pause always starts right on the trigger
+        and the color flash is simply delayed until the pause ends."""
+        cfg = self.config.color_mapping.beat_sync
+
+        raw_energy = band_energy(frame, cfg.detect_low_hz, cfg.detect_high_hz)
+        is_beat = self._beat_detector.update(raw_energy, wall_now)
+
+        flash_now = False
+        if is_beat:
+            if (
+                cfg.dark_pulse_probability > 0.0
+                and cfg.dark_pulse_duration_ms > 0.0
+                and random.random() < cfg.dark_pulse_probability
+            ):
+                self._beat_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0
+            else:
+                self._beat_dark_until = None
+                flash_now = True
+
+        if self._beat_dark_until is not None and wall_now >= self._beat_dark_until:
+            self._beat_dark_until = None
+            flash_now = True
+
+        if flash_now:
+            self._beat_target_hue = self._pick_next_beat_hue(cfg, frame)
+            self.last_beat_time = wall_now
+
+        in_dark_pulse = self._beat_dark_until is not None
+        hue_s = self._hue_smoother_beat.update(self._beat_target_hue, dt)
+
+        if in_dark_pulse:
+            target_value = cfg.sustain_brightness * (1.0 - cfg.dark_pulse_depth)
+        elif flash_now:
+            target_value = cfg.flash_brightness
+        else:
+            target_value = cfg.sustain_brightness
+        value_s = self._smoother_beat_value.update(target_value, dt)
+
+        self.latest_band3_levels = {
+            "beat_energy": raw_energy,
+            "hue": hue_s,
+            "value": value_s,
+            "beat": 1.0 if is_beat else 0.0,
+            "dark_pulse": 1.0 if in_dark_pulse else 0.0,
+        }
+        self._history_beat.push(wall_now, np.array([hue_s, value_s]))
+
+        colors: Dict[str, Color] = {}
+        for device_id in selected_ids:
+            effect = self.config.per_lamp_effects.get(device_id)
+            sample_t = wall_now - ((effect.phase_offset_ms / 1000.0) if effect else 0.0)
+            vals = self._history_beat.sample_at(sample_t)
+            if vals is None:
+                vals = np.array([hue_s, value_s])
+            mult = effect.sensitivity_mult if effect else 1.0
+            color = self.color_engine.compute_beat_sync(vals[0], cfg.saturation, clip(vals[1] * mult))
+            if effect is not None:
+                color = apply_per_lamp_effect(color, effect)
+            colors[device_id] = color
+        return colors
+
+    def _pick_next_beat_hue(self, cfg, frame: SpectrumFrame) -> float:
+        if cfg.hue_mode == "step":
+            self._beat_hue_cursor = (self._beat_hue_cursor + cfg.hue_step_deg) % 360.0
+            return self._beat_hue_cursor
+
+        if cfg.hue_mode == "spectrum":
+            centroid = spectral_centroid_hz(frame)
+            hsv_cfg = self.config.color_mapping.hsv
+            high = 16000.0
+            t = (math.log(clip(centroid, 20.0, high)) - math.log(20.0)) / (math.log(high) - math.log(20.0))
+            return lerp(hsv_cfg.hue_min_deg, hsv_cfg.hue_max_deg, t)
+
+        # "random" (default): pick a hue that's visibly different from the
+        # last one, so every beat gives a clearly new color instead of
+        # sometimes landing right next to the previous hue by chance.
+        candidate = random.uniform(0.0, 360.0)
+        for _ in range(8):
+            delta = abs(((candidate - self._beat_target_hue + 180.0) % 360.0) - 180.0)
+            if delta >= cfg.min_hue_jump_deg:
+                break
+            candidate = random.uniform(0.0, 360.0)
+        return candidate
+
+    def _tick_beat_sync_white_mode(
+        self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids
+    ) -> "Tuple[Dict[str, WhiteTarget], Dict[str, Color]]":
+        """Same rhythm-reactive envelope as Beat Sync (including dark
+        pulses), but the "hue" being jumped between beats is a color
+        TEMPERATURE (warm<->cool) instead - drives the bulb's WHITE
+        work_mode (brightness + temp_value_v2) rather than RGB. Returns
+        (real WhiteTargets to send, approximate RGB preview Colors for the
+        UI only)."""
+        cfg = self.config.color_mapping.beat_sync_white
+
+        raw_energy = band_energy(frame, cfg.detect_low_hz, cfg.detect_high_hz)
+        is_beat = self._beat_detector_white.update(raw_energy, wall_now)
+
+        flash_now = False
+        if is_beat:
+            if (
+                cfg.dark_pulse_probability > 0.0
+                and cfg.dark_pulse_duration_ms > 0.0
+                and random.random() < cfg.dark_pulse_probability
+            ):
+                self._beat_white_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0
+            else:
+                self._beat_white_dark_until = None
+                flash_now = True
+
+        if self._beat_white_dark_until is not None and wall_now >= self._beat_white_dark_until:
+            self._beat_white_dark_until = None
+            flash_now = True
+
+        if flash_now:
+            self._beat_white_target_temp = self._pick_next_white_temp(cfg)
+            self.last_beat_time_white = wall_now
+
+        in_dark_pulse = self._beat_white_dark_until is not None
+        temp_s = self._temp_smoother_beat_white.update(self._beat_white_target_temp, dt)
+
+        if in_dark_pulse:
+            target_value = cfg.sustain_brightness * (1.0 - cfg.dark_pulse_depth)
+        elif flash_now:
+            target_value = cfg.flash_brightness
+        else:
+            target_value = cfg.sustain_brightness
+        value_s = self._smoother_beat_white_value.update(target_value, dt)
+
+        self.latest_band3_levels = {
+            "beat_energy": raw_energy,
+            "temp": temp_s,
+            "value": value_s,
+            "beat": 1.0 if is_beat else 0.0,
+            "dark_pulse": 1.0 if in_dark_pulse else 0.0,
+        }
+        self._history_beat_white.push(wall_now, np.array([temp_s, value_s]))
+
+        targets: Dict[str, WhiteTarget] = {}
+        preview: Dict[str, Color] = {}
+        for device_id in selected_ids:
+            effect = self.config.per_lamp_effects.get(device_id)
+            sample_t = wall_now - ((effect.phase_offset_ms / 1000.0) if effect else 0.0)
+            vals = self._history_beat_white.sample_at(sample_t)
+            if vals is None:
+                vals = np.array([temp_s, value_s])
+            mult = effect.sensitivity_mult * (effect.brightness_mult if effect else 1.0) if effect else 1.0
+            target = WhiteTarget(brightness=vals[1] * mult, temp=vals[0]).clamped()
+            targets[device_id] = target
+            preview[device_id] = target.to_preview_color()
+        return targets, preview
+
+    def _pick_next_white_temp(self, cfg) -> float:
+        if cfg.temp_mode == "alternate":
+            # Ping-pong between the warm and cool ends of the range.
+            dist_to_max = abs(self._beat_white_target_temp - cfg.temp_max)
+            dist_to_min = abs(self._beat_white_target_temp - cfg.temp_min)
+            return cfg.temp_min if dist_to_max < dist_to_min else cfg.temp_max
+
+        # "random" (default): pick a temp visibly different from the last one.
+        span = max(cfg.temp_max - cfg.temp_min, 1e-6)
+        candidate = cfg.temp_min + random.random() * span
+        for _ in range(8):
+            if abs(candidate - self._beat_white_target_temp) >= min(cfg.min_temp_jump, span):
+                break
+            candidate = cfg.temp_min + random.random() * span
+        return candidate
+
+    def _tick_peak_flash_mode(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids) -> Dict[str, Color]:
+        """Sensitive broadband peak detection drives a brightness flash (on
+        top of a loudness-tracking baseline), treble energy blends the
+        output toward white, and hue continuously, slowly flows over time
+        instead of snapping - see PeakFlashModeConfig's docstring for the
+        full rationale."""
+        cfg = self.config.color_mapping.peak_flash
+
+        raw_energy = band_energy(frame, cfg.detect_low_hz, cfg.detect_high_hz)
+        is_peak = self._peak_detector.update(raw_energy, wall_now)
+        if is_peak:
+            self.last_peak_time = wall_now
+            # Randomness factor: on this detected (music-synced) peak, roll a
+            # chance to inject a random hue jump on top of the continuous
+            # flow below. The jump persists (accumulates) rather than
+            # snapping back, so the color story keeps going from wherever it
+            # lands - 0 = never jumps (pure smooth flow), 1 = jumps every peak.
+            if cfg.randomness > 0.0 and random.random() < cfg.randomness:
+                jump = random.uniform(-cfg.random_jump_range_deg, cfg.random_jump_range_deg)
+                self._hue_random_offset = (self._hue_random_offset + jump) % 360.0
+
+        # Continuous loudness-tracking baseline brightness.
+        loudness_s = self._loudness_smoother.update(raw_energy, dt)
+        baseline_value = lerp(cfg.baseline_min_brightness, cfg.baseline_max_brightness, loudness_s)
+        target_value = cfg.flash_brightness if is_peak else baseline_value
+        value_s = self._flash_value_smoother.update(target_value, dt)
+
+        # Treble -> white blend (independent of the peak flash above).
+        treble_energy = band_energy(frame, cfg.treble_low_hz, cfg.treble_high_hz)
+        whiteness_target = clip(treble_energy * cfg.treble_white_amount)
+        whiteness_s = self._white_smoother.update(whiteness_target, dt)
+        effective_saturation = clip(cfg.saturation * (1.0 - whiteness_s))
+
+        # Continuous, slowly-flowing hue - the "storytelling" color arc.
+        if cfg.hue_source == "centroid":
+            centroid = spectral_centroid_hz(frame)
+            hsv_cfg = self.config.color_mapping.hsv
+            high = 16000.0
+            t = (math.log(clip(centroid, 20.0, high)) - math.log(20.0)) / (math.log(high) - math.log(20.0))
+            hue_target = lerp(hsv_cfg.hue_min_deg, hsv_cfg.hue_max_deg, t)
+        else:  # "drift": a constant slow autonomous rotation, independent of content
+            self._hue_drift_deg = (self._hue_drift_deg + cfg.drift_speed_deg_per_s * dt) % 360.0
+            hue_target = self._hue_drift_deg
+        hue_target = (hue_target + self._hue_random_offset) % 360.0
+        hue_s = self._hue_smoother_peak.update(hue_target, dt)
+
+        self.latest_band3_levels = {
+            "peak_energy": raw_energy,
+            "treble_energy": treble_energy,
+            "hue": hue_s,
+            "value": value_s,
+            "whiteness": whiteness_s,
+            "peak": 1.0 if is_peak else 0.0,
+        }
+        self._history_peak.push(wall_now, np.array([hue_s, value_s, effective_saturation]))
+
+        colors: Dict[str, Color] = {}
+        for device_id in selected_ids:
+            effect = self.config.per_lamp_effects.get(device_id)
+            sample_t = wall_now - ((effect.phase_offset_ms / 1000.0) if effect else 0.0)
+            vals = self._history_peak.sample_at(sample_t)
+            if vals is None:
+                vals = np.array([hue_s, value_s, effective_saturation])
+            mult = effect.sensitivity_mult if effect else 1.0
+            color = self.color_engine.compute_peak_flash(vals[0], vals[2], clip(vals[1] * mult))
+            if effect is not None:
+                color = apply_per_lamp_effect(color, effect)
+            colors[device_id] = color
+        return colors
+
+    # -- Chase overlay: layered on top of whichever mode ran above ------------------------
+    #
+    # The actual position/weight/color math lives in effects/chase.py
+    # (ChaseAnimator + get_chase_groups), shared with the standalone manual
+    # control app - this method just wires it up to this engine's audio data.
+
+    def _apply_chase_overlay(
+        self, colors: Dict[str, Color], frame: SpectrumFrame, dt: float, wall_now: float, selected_ids
+    ) -> Dict[str, Color]:
+        cfg = self.config.chase
+        groups = get_chase_groups(self.config.per_lamp_effects, selected_ids)
+        if len(groups) < 2:
+            return colors  # need at least 2 chase positions for a chase to mean anything
+
+        beat_energy = None
+        if cfg.sync_to_beat:
+            beat_energy = band_energy(frame, cfg.beat_detect_low_hz, cfg.beat_detect_high_hz)
+
+        dwell_weights = get_chase_group_dwell_weights(self.config.per_lamp_effects, groups)
+        self._chase_animator.tick(
+            dt, num_positions=len(groups), beat_band_energy=beat_energy, now_s=wall_now, dwell_weights=dwell_weights
+        )
+        return self._chase_animator.apply(colors, groups)

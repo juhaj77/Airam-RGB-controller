@@ -1,0 +1,2 @@
+# Extra dependencies for running the automated tests (not needed to run the app itself)
+pytest>=7.4.0

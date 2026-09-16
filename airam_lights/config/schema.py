@@ -1,0 +1,875 @@
+"""Dataclass definitions for the whole application configuration.
+
+Everything here is plain, JSON-friendly data - no business logic. Each dataclass
+implements `to_dict` / `from_dict` so the config can round-trip through a
+human-readable JSON file (see `store.py`).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field, asdict
+from typing import Dict, List, Optional
+
+
+# ---------------------------------------------------------------------------
+# Devices
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DeviceConfig:
+    """One physical Airam bulb, as needed for local Tuya control."""
+
+    id: str  # Tuya device id ("gwId")
+    name: str  # user-assigned friendly name, e.g. "Lamp 1"
+    ip: str  # last-known LAN IP address
+    local_key: str  # Tuya local_key, obtained once via the cloud setup wizard
+    version: str = "3.3"  # Tuya local protocol version (3.1/3.3/3.4/3.5)
+    enabled: bool = True  # participates in visualization when True
+    selected: bool = True  # currently selected in the UI lamp list
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DeviceConfig":
+        return cls(
+            id=d["id"],
+            name=d.get("name", d["id"]),
+            ip=d.get("ip", ""),
+            local_key=d.get("local_key", ""),
+            version=str(d.get("version", "3.3")),
+            enabled=d.get("enabled", True),
+            selected=d.get("selected", True),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Frequency bands
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BandDefinition:
+    name: str
+    low_hz: float
+    high_hz: float
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BandDefinition":
+        return cls(name=d["name"], low_hz=float(d["low_hz"]), high_hz=float(d["high_hz"]))
+
+
+def default_3band() -> List[BandDefinition]:
+    return [
+        BandDefinition("Bass", 20, 150),
+        BandDefinition("Mid", 150, 2000),
+        BandDefinition("Treble", 2000, 12000),
+    ]
+
+
+def default_8band() -> List[BandDefinition]:
+    return [
+        BandDefinition("Band 1", 20, 60),
+        BandDefinition("Band 2", 60, 120),
+        BandDefinition("Band 3", 120, 250),
+        BandDefinition("Band 4", 250, 500),
+        BandDefinition("Band 5", 500, 1000),
+        BandDefinition("Band 6", 1000, 2000),
+        BandDefinition("Band 7", 2000, 5000),
+        BandDefinition("Band 8", 5000, 12000),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Smoothing
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SmoothingConfig:
+    """Attack/release exponential smoothing, in milliseconds.
+
+    A rising signal is smoothed with `attack_ms`, a falling one with
+    `release_ms`, so e.g. bass hits can snap up quickly but decay gently
+    instead of both directions blending abruptly like the stock Airam
+    Music Sync.
+    """
+
+    attack_ms: float = 60.0
+    release_ms: float = 300.0
+    # Ignore changes smaller than this (0..1 normalized channel units) to
+    # avoid sending imperceptible network updates.
+    min_change_threshold: float = 0.015
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SmoothingConfig":
+        return cls(
+            attack_ms=float(d.get("attack_ms", 60.0)),
+            release_ms=float(d.get("release_ms", 300.0)),
+            min_change_threshold=float(d.get("min_change_threshold", 0.015)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Color mapping
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ChannelMap:
+    """Maps one frequency range onto one output channel (R, G or B).
+
+    Used both for the "RGB Frequency" default mode (bass/mid/treble -> R/G/B)
+    and for "Custom" mode, which is the same mechanism with user-editable
+    ranges - there is deliberately no separate code path for "custom".
+    """
+
+    low_hz: float
+    high_hz: float
+    gain: float = 1.0
+    min_level: float = 0.0  # input level (0..1) mapped to output 0
+    max_level: float = 1.0  # input level (0..1) mapped to output 1
+    gamma: float = 1.0  # output = output ** (1/gamma)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ChannelMap":
+        return cls(
+            low_hz=float(d["low_hz"]),
+            high_hz=float(d["high_hz"]),
+            gain=float(d.get("gain", 1.0)),
+            min_level=float(d.get("min_level", 0.0)),
+            max_level=float(d.get("max_level", 1.0)),
+            gamma=float(d.get("gamma", 1.0)),
+        )
+
+
+@dataclass
+class RGBModeConfig:
+    """Backs both 'RGB Frequency' and 'Custom' color mapping modes."""
+
+    r: ChannelMap = field(default_factory=lambda: ChannelMap(20, 150))
+    g: ChannelMap = field(default_factory=lambda: ChannelMap(150, 2000))
+    b: ChannelMap = field(default_factory=lambda: ChannelMap(2000, 12000))
+    sensitivity: float = 1.0  # overall input gain applied before per-channel gain
+
+    def to_dict(self) -> dict:
+        return {
+            "r": self.r.to_dict(),
+            "g": self.g.to_dict(),
+            "b": self.b.to_dict(),
+            "sensitivity": self.sensitivity,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RGBModeConfig":
+        return cls(
+            r=ChannelMap.from_dict(d.get("r", {"low_hz": 20, "high_hz": 150})),
+            g=ChannelMap.from_dict(d.get("g", {"low_hz": 150, "high_hz": 2000})),
+            b=ChannelMap.from_dict(d.get("b", {"low_hz": 2000, "high_hz": 12000})),
+            sensitivity=float(d.get("sensitivity", 1.0)),
+        )
+
+
+@dataclass
+class HSVModeConfig:
+    """'HSV Music' mode: hue from spectral centroid, value from overall
+    energy, saturation from spectral contrast."""
+
+    hue_min_deg: float = 240.0  # hue at the lowest centroid (low freq -> blue by default)
+    hue_max_deg: float = 0.0  # hue at the highest centroid (high freq -> red)
+    brightness_min: float = 0.05
+    brightness_max: float = 1.0
+    saturation_base: float = 0.6
+    saturation_contrast_gain: float = 0.5
+    sensitivity: float = 1.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "HSVModeConfig":
+        return cls(
+            hue_min_deg=float(d.get("hue_min_deg", 240.0)),
+            hue_max_deg=float(d.get("hue_max_deg", 0.0)),
+            brightness_min=float(d.get("brightness_min", 0.05)),
+            brightness_max=float(d.get("brightness_max", 1.0)),
+            saturation_base=float(d.get("saturation_base", 0.6)),
+            saturation_contrast_gain=float(d.get("saturation_contrast_gain", 0.5)),
+            sensitivity=float(d.get("sensitivity", 1.0)),
+        )
+
+
+@dataclass
+class SpectrumModeConfig:
+    """'8-Band Spectrum' mode: one band drives one lamp's brightness/saturation
+    around a user-chosen base hue."""
+
+    base_hue_deg: float = 260.0  # used when a lamp has no per-lamp hue offset
+    hue_step_deg: float = 0.0  # optional hue rotation across bands 1..8 (rainbow look)
+    saturation: float = 0.9
+    min_brightness: float = 0.04
+    max_brightness: float = 1.0
+    sensitivity: float = 1.0
+    drive_saturation_too: bool = False  # if True, band level also modulates saturation
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SpectrumModeConfig":
+        return cls(
+            base_hue_deg=float(d.get("base_hue_deg", 260.0)),
+            hue_step_deg=float(d.get("hue_step_deg", 0.0)),
+            saturation=float(d.get("saturation", 0.9)),
+            min_brightness=float(d.get("min_brightness", 0.04)),
+            max_brightness=float(d.get("max_brightness", 1.0)),
+            sensitivity=float(d.get("sensitivity", 1.0)),
+            drive_saturation_too=bool(d.get("drive_saturation_too", False)),
+        )
+
+
+@dataclass
+class BeatSyncModeConfig:
+    """'Beat Sync' mode: on every detected beat/onset, jump to a fresh,
+    fully-saturated hue at full brightness, then decay toward a dimmer
+    baseline until the next hit - a much more dramatic, obviously
+    rhythm-locked look than smoothly blending continuous band levels."""
+
+    detect_low_hz: float = 40.0
+    detect_high_hz: float = 200.0  # kick-drum range by default
+    sensitivity: float = 1.6  # beat fires when energy > rolling_avg * sensitivity
+    min_interval_ms: float = 120.0  # refractory period between beats
+    min_energy: float = 0.12  # absolute floor, avoids false triggers in near-silence
+
+    hue_mode: str = "random"  # "random" | "step" | "spectrum"
+    hue_step_deg: float = 137.5  # used when hue_mode == "step" (golden angle - good spread, never repeats)
+    min_hue_jump_deg: float = 60.0  # used when hue_mode == "random": force a visibly different color each hit
+
+    saturation: float = 1.0
+    flash_brightness: float = 1.0  # value right at the beat
+    sustain_brightness: float = 0.25  # value it decays toward between beats
+
+    hue_attack_ms: float = 40.0  # how fast the hue snaps to the new target
+    brightness_attack_ms: float = 15.0  # how fast brightness snaps up on a beat
+    brightness_release_ms: float = 350.0  # how slowly brightness decays afterward
+
+    # "Dark pulses": on a random subset of beats, briefly dip toward black
+    # (a rhythm-synced pause) BEFORE flashing to the new color, instead of
+    # flashing immediately - a tension-and-release, strobe-like accent.
+    # Real-time detection can only react to a beat as it happens (it can't
+    # anticipate one), so the pause always happens right after the trigger
+    # and the actual color flash is delayed until the pause ends.
+    dark_pulse_probability: float = 0.0  # 0..1: chance a given beat gets a pause first
+    dark_pulse_duration_ms: float = 70.0  # how long the pause lasts
+    dark_pulse_depth: float = 1.0  # 0..1: how dark (1.0 = fully black)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BeatSyncModeConfig":
+        return cls(
+            detect_low_hz=float(d.get("detect_low_hz", 40.0)),
+            detect_high_hz=float(d.get("detect_high_hz", 200.0)),
+            sensitivity=float(d.get("sensitivity", 1.6)),
+            min_interval_ms=float(d.get("min_interval_ms", 120.0)),
+            min_energy=float(d.get("min_energy", 0.12)),
+            hue_mode=d.get("hue_mode", "random"),
+            hue_step_deg=float(d.get("hue_step_deg", 137.5)),
+            min_hue_jump_deg=float(d.get("min_hue_jump_deg", 60.0)),
+            saturation=float(d.get("saturation", 1.0)),
+            flash_brightness=float(d.get("flash_brightness", 1.0)),
+            sustain_brightness=float(d.get("sustain_brightness", 0.25)),
+            hue_attack_ms=float(d.get("hue_attack_ms", 40.0)),
+            brightness_attack_ms=float(d.get("brightness_attack_ms", 15.0)),
+            brightness_release_ms=float(d.get("brightness_release_ms", 350.0)),
+            dark_pulse_probability=float(d.get("dark_pulse_probability", 0.0)),
+            dark_pulse_duration_ms=float(d.get("dark_pulse_duration_ms", 70.0)),
+            dark_pulse_depth=float(d.get("dark_pulse_depth", 1.0)),
+        )
+
+
+@dataclass
+class PeakFlashModeConfig:
+    """'Peak Flash' mode: reacts sensitively to ANY sudden loudness spike
+    across the whole spectrum (not just bass), flashes toward pure white
+    specifically when treble/cymbal/sibilance energy is dominant, and
+    otherwise shows fully-saturated color whose hue *continuously* and
+    slowly flows over time - a narrative color arc - rather than jumping
+    discretely on each hit like Beat Sync does. Brightness also gently
+    tracks overall loudness between peaks, on top of the sharp peak flashes.
+    """
+
+    # Broadband peak/onset detection - deliberately wide by default so any
+    # kind of transient (kick, snare, hi-hat, vocal hit) can trigger it.
+    detect_low_hz: float = 20.0
+    detect_high_hz: float = 16000.0
+    sensitivity: float = 1.3
+    min_interval_ms: float = 60.0
+    min_energy: float = 0.08
+
+    # Treble energy blends the output toward white - a "sparkle" on
+    # cymbals/hi-hats/sibilance, layered on top of everything else.
+    treble_low_hz: float = 5000.0
+    treble_high_hz: float = 16000.0
+    treble_white_amount: float = 1.0  # gain: how strongly treble energy pulls toward white
+    white_attack_ms: float = 30.0  # how fast it flashes toward white
+    white_release_ms: float = 220.0  # how fast it fades back to color
+
+    # Continuous hue "storytelling" flow - this is the smooth color-blend
+    # math: a long time constant here means hue drifts like a slow narrative
+    # arc instead of snapping, so consecutive colors always flow into each
+    # other richly no matter what triggers brightness/whiteness.
+    hue_source: str = "drift"  # "drift" (autonomous slow rotation) | "centroid" (follows spectral centroid)
+    hue_flow_ms: float = 4000.0  # smoothing time constant for the hue - the main "richness" slider
+    drift_speed_deg_per_s: float = 6.0  # used when hue_source == "drift"
+
+    # On top of the continuous flow above: on each detected peak, roll a
+    # chance (0..1) to inject a random hue jump - synced to the music since
+    # it only ever fires exactly on a detected peak. 0 = pure smooth flow,
+    # never jumps. 1 = every peak jumps. The jump persists (the story
+    # continues from the new hue) rather than snapping back.
+    randomness: float = 0.0
+    random_jump_range_deg: float = 180.0  # max size of each jump (uniform +/- this)
+
+    saturation: float = 1.0
+
+    # Brightness: a continuous baseline tracks overall loudness, plus a fast
+    # flash on every detected peak that decays back toward that baseline.
+    baseline_min_brightness: float = 0.20
+    baseline_max_brightness: float = 0.75
+    flash_brightness: float = 1.0
+    flash_attack_ms: float = 12.0
+    flash_release_ms: float = 260.0
+    loudness_smoothing_ms: float = 300.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PeakFlashModeConfig":
+        return cls(
+            detect_low_hz=float(d.get("detect_low_hz", 20.0)),
+            detect_high_hz=float(d.get("detect_high_hz", 16000.0)),
+            sensitivity=float(d.get("sensitivity", 1.3)),
+            min_interval_ms=float(d.get("min_interval_ms", 60.0)),
+            min_energy=float(d.get("min_energy", 0.08)),
+            treble_low_hz=float(d.get("treble_low_hz", 5000.0)),
+            treble_high_hz=float(d.get("treble_high_hz", 16000.0)),
+            treble_white_amount=float(d.get("treble_white_amount", 1.0)),
+            white_attack_ms=float(d.get("white_attack_ms", 30.0)),
+            white_release_ms=float(d.get("white_release_ms", 220.0)),
+            hue_source=d.get("hue_source", "drift"),
+            hue_flow_ms=float(d.get("hue_flow_ms", 4000.0)),
+            drift_speed_deg_per_s=float(d.get("drift_speed_deg_per_s", 6.0)),
+            randomness=float(d.get("randomness", 0.0)),
+            random_jump_range_deg=float(d.get("random_jump_range_deg", 180.0)),
+            saturation=float(d.get("saturation", 1.0)),
+            baseline_min_brightness=float(d.get("baseline_min_brightness", 0.20)),
+            baseline_max_brightness=float(d.get("baseline_max_brightness", 0.75)),
+            flash_brightness=float(d.get("flash_brightness", 1.0)),
+            flash_attack_ms=float(d.get("flash_attack_ms", 12.0)),
+            flash_release_ms=float(d.get("flash_release_ms", 260.0)),
+            loudness_smoothing_ms=float(d.get("loudness_smoothing_ms", 300.0)),
+        )
+
+
+@dataclass
+class BeatSyncWhiteModeConfig:
+    """'Beat Sync White' mode: the same rhythm-reactive envelope as Beat
+    Sync, but drives the bulb's WHITE work_mode (brightness + color
+    temperature, DPs 22/23) instead of RGB color (DP 24) - warm/cool flashes
+    on the beat instead of hue jumps. Uses its own independent beat detector
+    and dark-pulse handling, identical in spirit to Beat Sync's."""
+
+    detect_low_hz: float = 40.0
+    detect_high_hz: float = 200.0
+    sensitivity: float = 1.6
+    min_interval_ms: float = 120.0
+    min_energy: float = 0.12
+
+    temp_mode: str = "random"  # "random" | "alternate"
+    temp_min: float = 0.0  # 0..1, 0 = warmest
+    temp_max: float = 1.0  # 0..1, 1 = coolest
+    min_temp_jump: float = 0.35  # used when temp_mode == "random": force a visibly different temp each hit
+
+    flash_brightness: float = 1.0
+    sustain_brightness: float = 0.25
+
+    temp_attack_ms: float = 40.0  # how fast the temperature snaps to its new target
+    brightness_attack_ms: float = 15.0
+    brightness_release_ms: float = 350.0
+
+    dark_pulse_probability: float = 0.0
+    dark_pulse_duration_ms: float = 70.0
+    dark_pulse_depth: float = 1.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BeatSyncWhiteModeConfig":
+        return cls(
+            detect_low_hz=float(d.get("detect_low_hz", 40.0)),
+            detect_high_hz=float(d.get("detect_high_hz", 200.0)),
+            sensitivity=float(d.get("sensitivity", 1.6)),
+            min_interval_ms=float(d.get("min_interval_ms", 120.0)),
+            min_energy=float(d.get("min_energy", 0.12)),
+            temp_mode=d.get("temp_mode", "random"),
+            temp_min=float(d.get("temp_min", 0.0)),
+            temp_max=float(d.get("temp_max", 1.0)),
+            min_temp_jump=float(d.get("min_temp_jump", 0.35)),
+            flash_brightness=float(d.get("flash_brightness", 1.0)),
+            sustain_brightness=float(d.get("sustain_brightness", 0.25)),
+            temp_attack_ms=float(d.get("temp_attack_ms", 40.0)),
+            brightness_attack_ms=float(d.get("brightness_attack_ms", 15.0)),
+            brightness_release_ms=float(d.get("brightness_release_ms", 350.0)),
+            dark_pulse_probability=float(d.get("dark_pulse_probability", 0.0)),
+            dark_pulse_duration_ms=float(d.get("dark_pulse_duration_ms", 70.0)),
+            dark_pulse_depth=float(d.get("dark_pulse_depth", 1.0)),
+        )
+
+
+@dataclass
+class ColorMappingConfig:
+    mode: str = "rgb_freq"  # "rgb_freq" | "hsv_music" | "custom" | "8band_spectrum" | "beat_sync" | "peak_flash" | "beat_sync_white"
+    rgb: RGBModeConfig = field(default_factory=RGBModeConfig)
+    custom: RGBModeConfig = field(default_factory=RGBModeConfig)
+    hsv: HSVModeConfig = field(default_factory=HSVModeConfig)
+    spectrum: SpectrumModeConfig = field(default_factory=SpectrumModeConfig)
+    beat_sync: BeatSyncModeConfig = field(default_factory=BeatSyncModeConfig)
+    peak_flash: PeakFlashModeConfig = field(default_factory=PeakFlashModeConfig)
+    beat_sync_white: BeatSyncWhiteModeConfig = field(default_factory=BeatSyncWhiteModeConfig)
+    smoothing: SmoothingConfig = field(default_factory=SmoothingConfig)
+    brightness: float = 1.0  # global brightness multiplier
+    saturation: float = 1.0  # global saturation multiplier
+    response_curve: str = "linear"  # "linear" | "log" | "exp2"
+    invert_brightness: bool = False  # applies to EVERY mode: 0 becomes bright, 1 becomes black
+
+    def to_dict(self) -> dict:
+        return {
+            "mode": self.mode,
+            "rgb": self.rgb.to_dict(),
+            "custom": self.custom.to_dict(),
+            "hsv": self.hsv.to_dict(),
+            "spectrum": self.spectrum.to_dict(),
+            "beat_sync": self.beat_sync.to_dict(),
+            "peak_flash": self.peak_flash.to_dict(),
+            "beat_sync_white": self.beat_sync_white.to_dict(),
+            "smoothing": self.smoothing.to_dict(),
+            "brightness": self.brightness,
+            "saturation": self.saturation,
+            "response_curve": self.response_curve,
+            "invert_brightness": self.invert_brightness,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ColorMappingConfig":
+        return cls(
+            mode=d.get("mode", "rgb_freq"),
+            rgb=RGBModeConfig.from_dict(d.get("rgb", {})),
+            custom=RGBModeConfig.from_dict(d.get("custom", {})),
+            hsv=HSVModeConfig.from_dict(d.get("hsv", {})),
+            spectrum=SpectrumModeConfig.from_dict(d.get("spectrum", {})),
+            beat_sync=BeatSyncModeConfig.from_dict(d.get("beat_sync", {})),
+            peak_flash=PeakFlashModeConfig.from_dict(d.get("peak_flash", {})),
+            beat_sync_white=BeatSyncWhiteModeConfig.from_dict(d.get("beat_sync_white", {})),
+            smoothing=SmoothingConfig.from_dict(d.get("smoothing", {})),
+            brightness=float(d.get("brightness", 1.0)),
+            saturation=float(d.get("saturation", 1.0)),
+            response_curve=d.get("response_curve", "linear"),
+            invert_brightness=bool(d.get("invert_brightness", False)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Per-lamp effects (optional variation across the 8 lamps)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PerLampEffect:
+    device_id: str
+    band_gains: Dict[str, float] = field(default_factory=dict)  # band name -> multiplier
+    phase_offset_ms: float = 0.0
+    brightness_mult: float = 1.0
+    saturation_mult: float = 1.0
+    hue_offset_deg: float = 0.0
+    sensitivity_mult: float = 1.0
+    # For 8-band spectrum mode: which band index (0-based) this lamp shows.
+    # None = assign automatically in selection order.
+    band_index: Optional[int] = None
+    # For the Chase overlay (applies regardless of mode - see ChaseEffectConfig):
+    # this lamp's position in the rotation order, 0-based. None = not part of
+    # the chase. The chase's actual lamp order is derived by sorting all
+    # lamps that have this set, ascending.
+    chase_order: Optional[int] = None
+    # How long the chase's moving highlight lingers at this lamp's position
+    # relative to others, e.g. a ceiling fixture with several physical spots
+    # sharing one chase_order can feel like it dwells there longer just from
+    # having more lamps lit at once - lower this for that position to
+    # compensate. 1.0 = default/uniform (matches the original behavior).
+    chase_dwell_mult: float = 1.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PerLampEffect":
+        return cls(
+            device_id=d["device_id"],
+            band_gains=dict(d.get("band_gains", {})),
+            phase_offset_ms=float(d.get("phase_offset_ms", 0.0)),
+            brightness_mult=float(d.get("brightness_mult", 1.0)),
+            saturation_mult=float(d.get("saturation_mult", 1.0)),
+            hue_offset_deg=float(d.get("hue_offset_deg", 0.0)),
+            sensitivity_mult=float(d.get("sensitivity_mult", 1.0)),
+            band_index=d.get("band_index", None),
+            chase_order=d.get("chase_order", None),
+            chase_dwell_mult=float(d.get("chase_dwell_mult", 1.0)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Chase overlay - an optional effect layered on top of ANY color mode
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ChaseEffectConfig:
+    """A moving highlight rotates through a chosen, ordered subset of lamps
+    (each lamp's position comes from its PerLampEffect.chase_order), creating
+    a spinning/chasing light effect - independent of, and layered on top of,
+    whichever color mode is currently active (RGB/HSV/8-Band/Beat Sync/Peak
+    Flash/Custom all get this overlay the same way).
+
+    Speed is either a constant number of full rotations per second
+    (`speed_rotations_per_s` - e.g. 0.5 means one full lap around the chase
+    order every 2 seconds), or, when `sync_to_beat` is on, driven by the
+    live-measured beat interval from its own independent beat detector:
+    `beat_multiplier=1` means the highlight advances exactly one lamp-step
+    per beat, `2` means two steps per beat (twice as fast), `0.5` means one
+    step every two beats (half as fast) - no music-theory knowledge needed.
+
+    The highlight only ever *modulates* whatever the active color mode is
+    already showing on that lamp - crucially, brightness is a multiplicative
+    boost on top of the base brightness, never an independent value, so a
+    lamp the active mode has deliberately dimmed to black (e.g. a Beat Sync
+    dark pulse) stays black even while the chase highlight passes over it.
+    """
+
+    enabled: bool = False
+
+    num_rotators: int = 1  # how many highlights travel the loop at once, evenly spaced
+    # (e.g. 2 = two highlights on opposite sides of the loop, both moving together)
+
+    speed_rotations_per_s: float = 0.3  # constant speed when not synced to beat: full loops/second
+    reverse: bool = False  # flips which way the highlight travels around the chase order
+    sync_to_beat: bool = False
+    beat_multiplier: float = 1.0  # lamp-steps advanced per detected beat, when synced
+
+    # The chase's own independent beat detector (works regardless of which
+    # color mode/its own beat detector, if any, is active).
+    beat_detect_low_hz: float = 40.0
+    beat_detect_high_hz: float = 200.0
+    beat_sensitivity: float = 1.6
+    beat_min_interval_ms: float = 120.0
+    beat_min_energy: float = 0.12
+
+    width: float = 0.7  # how many lamp-positions wide the highlight is (soft falloff) - smaller = crisper single-lamp look
+    intensity: float = 3.0  # brightness boost multiplier at the highlight's peak (base 0 always stays 0)
+    # "linear": weight falls off at a constant rate from the peak - the peak
+    # is a single instant, never lingered on, which can feel like the
+    # highlight color flashes by too briefly. "bezier": an eased S-curve
+    # (smoothstep) that's nearly flat right at the peak and right at zero,
+    # transitioning fastest in between - the highlight visibly *dwells* in
+    # its color for longer before smoothly handing off to the background.
+    falloff_curve: str = "linear"  # "linear" | "bezier"
+
+    color_mode: str = "custom"  # "custom" | "complementary" | "hue_shift"
+    custom_hue_deg: float = 280.0
+    custom_saturation: float = 1.0
+    # Used when color_mode == "hue_shift": each successive chase position
+    # shows a hue offset by this many degrees from the previous one (starting
+    # from custom_hue_deg), so the traveling light's own color gradually
+    # cycles through the spectrum as it moves around the loop.
+    hue_shift_step_deg: float = 45.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ChaseEffectConfig":
+        # Backward-compat: earlier builds used "speed_steps_per_s" (steps/second,
+        # not rotations/second) - if only the old key is present, ignore it and
+        # fall back to the new default rather than silently misinterpreting units.
+        return cls(
+            enabled=bool(d.get("enabled", False)),
+            num_rotators=int(d.get("num_rotators", 1)),
+            speed_rotations_per_s=float(d.get("speed_rotations_per_s", 0.3)),
+            reverse=bool(d.get("reverse", False)),
+            sync_to_beat=bool(d.get("sync_to_beat", False)),
+            beat_multiplier=float(d.get("beat_multiplier", 1.0)),
+            beat_detect_low_hz=float(d.get("beat_detect_low_hz", 40.0)),
+            beat_detect_high_hz=float(d.get("beat_detect_high_hz", 200.0)),
+            beat_sensitivity=float(d.get("beat_sensitivity", 1.6)),
+            beat_min_interval_ms=float(d.get("beat_min_interval_ms", 120.0)),
+            beat_min_energy=float(d.get("beat_min_energy", 0.12)),
+            width=float(d.get("width", 0.7)),
+            intensity=float(d.get("intensity", 3.0)),
+            falloff_curve=d.get("falloff_curve", "linear"),
+            color_mode=d.get("color_mode", "custom"),
+            hue_shift_step_deg=float(d.get("hue_shift_step_deg", 45.0)),
+            custom_hue_deg=float(d.get("custom_hue_deg", 280.0)),
+            custom_saturation=float(d.get("custom_saturation", 1.0)),
+        )
+
+
+@dataclass
+class WhiteChaseEffectConfig:
+    """The White-mode counterpart to ChaseEffectConfig, used by the
+    standalone manual control app (and available for reuse in the music app
+    later): instead of an RGB/hue highlight, a warm-or-cool color
+    TEMPERATURE region rotates through the chase-ordered lamp positions
+    (grouping by PerLampEffect.chase_order works identically to the RGB
+    chase - see effects/chase.py's get_chase_groups(), shared by both).
+
+    No "sync to beat" here - this effect is specifically for the no-audio
+    manual app.
+    """
+
+    enabled: bool = False
+    num_rotators: int = 1
+    speed_rotations_per_s: float = 0.3
+    reverse: bool = False  # flips which way the highlight travels around the chase order
+    width: float = 0.7
+    intensity: float = 1.5  # brightness boost multiplier at the highlight's peak
+    falloff_curve: str = "linear"  # "linear" | "bezier" - see ChaseEffectConfig.falloff_curve
+    target_temp: float = 0.0  # 0..1: the region that sweeps through - 0=warm, 1=cool
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "WhiteChaseEffectConfig":
+        return cls(
+            enabled=bool(d.get("enabled", False)),
+            num_rotators=int(d.get("num_rotators", 1)),
+            speed_rotations_per_s=float(d.get("speed_rotations_per_s", 0.3)),
+            reverse=bool(d.get("reverse", False)),
+            width=float(d.get("width", 0.7)),
+            intensity=float(d.get("intensity", 1.5)),
+            falloff_curve=d.get("falloff_curve", "linear"),
+            target_temp=float(d.get("target_temp", 0.0)),
+        )
+
+
+@dataclass
+class AmbientSceneConfig:
+    """A self-looping ambient animation for the standalone manual control
+    app, driven by ONE shared PC-side clock - every selected lamp is
+    inherently synchronized by construction, since the same phase value is
+    computed once and pushed to all of them together. This is deliberately
+    an alternative to the bulb's own onboard 'scene' animations (DP 25):
+    those run autonomously on each bulb's own internal clock starting from
+    whenever they were individually triggered, which is exactly why
+    power-cycling multiple bulbs at once was the only way to line them up -
+    and even then, Wi-Fi smart plugs' own switch-on latency makes that
+    unreliable. A PC-driven loop has no such problem. The bulb's DP 25
+    on-wire packing was also never independently confirmed for these bulbs
+    (see DEVICE_NOTES.md), so this avoids depending on it at all.
+
+    Each lamp can optionally run the SAME animation phase-shifted in time
+    via its own PerLampEffect.phase_offset_ms (0 = perfectly synchronized,
+    the default; nonzero values create a traveling "wave" look instead).
+    """
+
+    enabled: bool = False
+    scene: str = "color_cycle"  # "color_cycle" | "breathing" | "temp_breathing"
+    speed_hz: float = 0.1  # cycles per second; one full loop = 1/speed_hz seconds
+    reverse: bool = False  # flips which way "color_cycle" sweeps the hue wheel (no visible effect on the symmetric breathing pulses)
+
+    # color_cycle / breathing (drives RGB colour work_mode)
+    hue: float = 0.0  # fixed hue for "breathing" - ignored by "color_cycle" (it cycles hue itself)
+    saturation: float = 1.0
+    brightness: float = 0.85  # color_cycle's constant brightness, or breathing's peak brightness
+    min_brightness: float = 0.05  # breathing's trough brightness
+
+    # temp_breathing (drives WHITE work_mode)
+    temp_min: float = 0.0
+    temp_max: float = 1.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AmbientSceneConfig":
+        return cls(
+            enabled=bool(d.get("enabled", False)),
+            scene=d.get("scene", "color_cycle"),
+            speed_hz=float(d.get("speed_hz", 0.1)),
+            reverse=bool(d.get("reverse", False)),
+            hue=float(d.get("hue", 0.0)),
+            saturation=float(d.get("saturation", 1.0)),
+            brightness=float(d.get("brightness", 0.85)),
+            min_brightness=float(d.get("min_brightness", 0.05)),
+            temp_min=float(d.get("temp_min", 0.0)),
+            temp_max=float(d.get("temp_max", 1.0)),
+        )
+
+
+@dataclass
+class ManualStateConfig:
+    """The manual control app's last-applied STATIC color/white-balance -
+    deliberately separate from ChaseEffectConfig/WhiteChaseEffectConfig,
+    which only remember the *animation* settings, not the actual base color
+    a user picked via 'Apply to Selected'. Without this, a picked color only
+    ever lived in ManualLightController.base_colors (pure in-memory state),
+    so restarting the app reset to an empty base - visually wrong even
+    though every *setting* was technically remembered correctly. Restored
+    and re-pushed to the lamps once at manual app startup.
+
+    `last_mode` tracks whether RGB or White was the last thing actually
+    applied (mirrors ManualLightController.mode), so restart picks up
+    whichever one you were using. Turning a selection off does NOT update
+    this - "off" is a power state, not a color preference, and should not
+    overwrite the color you'll want back when you turn it on again.
+    """
+
+    last_mode: str = "rgb"  # "rgb" | "white"
+    last_color_r: float = 0.2
+    last_color_g: float = 0.5
+    last_color_b: float = 0.9
+    last_white_brightness: float = 0.8
+    last_white_temp: float = 0.5
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ManualStateConfig":
+        return cls(
+            last_mode=d.get("last_mode", "rgb"),
+            last_color_r=float(d.get("last_color_r", 0.2)),
+            last_color_g=float(d.get("last_color_g", 0.5)),
+            last_color_b=float(d.get("last_color_b", 0.9)),
+            last_white_brightness=float(d.get("last_white_brightness", 0.8)),
+            last_white_temp=float(d.get("last_white_temp", 0.5)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Audio
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AudioConfig:
+    device_index: Optional[int] = None  # PyAudioWPatch loopback device index; None = default
+    samplerate: int = 48000
+    block_size: int = 1024
+    fft_size: int = 2048
+    analysis_update_hz: float = 60.0  # how often we pull a new FFT frame
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AudioConfig":
+        return cls(
+            device_index=d.get("device_index", None),
+            samplerate=int(d.get("samplerate", 48000)),
+            block_size=int(d.get("block_size", 1024)),
+            fft_size=int(d.get("fft_size", 2048)),
+            analysis_update_hz=float(d.get("analysis_update_hz", 60.0)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Network / lamp command pacing
+# ---------------------------------------------------------------------------
+
+@dataclass
+class NetworkConfig:
+    visual_update_hz: float = 30.0  # how often the color engine recomputes
+    lamp_command_rate_hz: float = 20.0  # per-lamp cap on outgoing commands
+    command_timeout_s: float = 0.3
+    max_retries: int = 1
+    auto_backoff: bool = True  # reduce rate automatically on repeated failures/latency
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "NetworkConfig":
+        return cls(
+            visual_update_hz=float(d.get("visual_update_hz", 30.0)),
+            lamp_command_rate_hz=float(d.get("lamp_command_rate_hz", 20.0)),
+            command_timeout_s=float(d.get("command_timeout_s", 0.3)),
+            max_retries=int(d.get("max_retries", 1)),
+            auto_backoff=bool(d.get("auto_backoff", True)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Top-level application config
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AppConfig:
+    devices: List[DeviceConfig] = field(default_factory=list)
+    groups: Dict[str, List[str]] = field(default_factory=dict)  # name -> device ids
+    bands_3: List[BandDefinition] = field(default_factory=default_3band)
+    bands_8: List[BandDefinition] = field(default_factory=default_8band)
+    color_mapping: ColorMappingConfig = field(default_factory=ColorMappingConfig)
+    per_lamp_effects: Dict[str, PerLampEffect] = field(default_factory=dict)
+    chase: "ChaseEffectConfig" = field(default_factory=lambda: ChaseEffectConfig())
+    white_chase: "WhiteChaseEffectConfig" = field(default_factory=lambda: WhiteChaseEffectConfig())
+    ambient_scene: "AmbientSceneConfig" = field(default_factory=lambda: AmbientSceneConfig())
+    manual_state: "ManualStateConfig" = field(default_factory=lambda: ManualStateConfig())
+    audio: AudioConfig = field(default_factory=AudioConfig)
+    network: NetworkConfig = field(default_factory=NetworkConfig)
+    presets: Dict[str, dict] = field(default_factory=dict)  # saved full color_mapping snapshots
+
+    def to_dict(self) -> dict:
+        return {
+            "devices": [d.to_dict() for d in self.devices],
+            "groups": self.groups,
+            "bands_3": [b.to_dict() for b in self.bands_3],
+            "bands_8": [b.to_dict() for b in self.bands_8],
+            "color_mapping": self.color_mapping.to_dict(),
+            "per_lamp_effects": {k: v.to_dict() for k, v in self.per_lamp_effects.items()},
+            "chase": self.chase.to_dict(),
+            "white_chase": self.white_chase.to_dict(),
+            "ambient_scene": self.ambient_scene.to_dict(),
+            "manual_state": self.manual_state.to_dict(),
+            "audio": self.audio.to_dict(),
+            "network": self.network.to_dict(),
+            "presets": self.presets,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AppConfig":
+        return cls(
+            devices=[DeviceConfig.from_dict(x) for x in d.get("devices", [])],
+            groups=dict(d.get("groups", {})),
+            bands_3=[BandDefinition.from_dict(x) for x in d.get("bands_3", [])] or default_3band(),
+            bands_8=[BandDefinition.from_dict(x) for x in d.get("bands_8", [])] or default_8band(),
+            color_mapping=ColorMappingConfig.from_dict(d.get("color_mapping", {})),
+            per_lamp_effects={
+                k: PerLampEffect.from_dict(v) for k, v in d.get("per_lamp_effects", {}).items()
+            },
+            chase=ChaseEffectConfig.from_dict(d.get("chase", {})),
+            white_chase=WhiteChaseEffectConfig.from_dict(d.get("white_chase", {})),
+            ambient_scene=AmbientSceneConfig.from_dict(d.get("ambient_scene", {})),
+            manual_state=ManualStateConfig.from_dict(d.get("manual_state", {})),
+            audio=AudioConfig.from_dict(d.get("audio", {})),
+            network=NetworkConfig.from_dict(d.get("network", {})),
+            presets=dict(d.get("presets", {})),
+        )
+
+    @classmethod
+    def with_defaults(cls) -> "AppConfig":
+        return cls()
