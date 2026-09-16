@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# App data - contains local Tuya keys, do not commit
+config/local_config.json
+config/devices.json
+*.local.json
+snapshot.json
+tinytuya.json
+
+# Logs
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+.pytest_cache/

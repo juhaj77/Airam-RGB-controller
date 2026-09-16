@@ -1,0 +1,662 @@
+{
+    "result": [
+        {
+            "active_time": 1789315014,
+            "biz_type": 18,
+            "category": "dj",
+            "create_time": 1783595640,
+            "icon": "smart/icon/bay1597219004677YsAw/5d58d099416e96c6d7c475a2f2ee8697.png",
+            "id": "bff8d66ceb4101144f5wh6",
+            "ip": "62.78.189.90",
+            "lat": "60.24",
+            "local_key": "T?:_v5fJ'!?Ux5w-",
+            "lon": "24.88",
+            "model": "PAR16 4.7W/345lm 827-865+RGB 36D",
+            "name": "KTV",
+            "online": true,
+            "owner_id": "306441096",
+            "product_id": "cawpuqfm0ed5ykfj",
+            "product_name": "PAR16 4.7W/345lm 827-865+RGB 36D 4713881",
+            "status": [
+                {
+                    "code": "switch_led",
+                    "value": true
+                },
+                {
+                    "code": "work_mode",
+                    "value": "white"
+                },
+                {
+                    "code": "bright_value_v2",
+                    "value": 1000
+                },
+                {
+                    "code": "temp_value_v2",
+                    "value": 620
+                },
+                {
+                    "code": "colour_data_v2",
+                    "value": "{\"h\":0,\"s\":0,\"v\":1000}"
+                },
+                {
+                    "code": "scene_data_v2",
+                    "value": "{\"scene_num\":1,\"scene_units\":[{\"bright\":200,\"h\":0,\"s\":0,\"temperature\":0,\"unit_change_mode\":\"static\",\"unit_gradient_duration\":13,\"unit_switch_duration\":14,\"v\":0}]}"
+                },
+                {
+                    "code": "countdown_1",
+                    "value": 0
+                },
+                {
+                    "code": "music_data",
+                    "value": ""
+                },
+                {
+                    "code": "control_data",
+                    "value": ""
+                },
+                {
+                    "code": "rhythm_mode",
+                    "value": "AAAAAAA="
+                },
+                {
+                    "code": "sleep_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "wakeup_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "do_not_disturb",
+                    "value": false
+                },
+                {
+                    "code": "remote_switch",
+                    "value": true
+                }
+            ],
+            "sub": false,
+            "time_zone": "+03:00",
+            "uid": "eu17893111923818TgSm",
+            "update_time": 1789391161,
+            "uuid": "da68bf5fd9881ae1"
+        },
+        {
+            "active_time": 1789315009,
+            "biz_type": 18,
+            "category": "dj",
+            "create_time": 1783595654,
+            "icon": "smart/icon/bay1597219004677YsAw/5d58d099416e96c6d7c475a2f2ee8697.png",
+            "id": "bf95fac11615e238a7pxxv",
+            "ip": "62.78.189.90",
+            "lat": "60.24",
+            "local_key": "rd5rs'C.=-wt14;`",
+            "lon": "24.88",
+            "model": "PAR16 4.7W/345lm 827-865+RGB 36D",
+            "name": "KEV",
+            "online": true,
+            "owner_id": "306441096",
+            "product_id": "cawpuqfm0ed5ykfj",
+            "product_name": "PAR16 4.7W/345lm 827-865+RGB 36D 4713881",
+            "status": [
+                {
+                    "code": "switch_led",
+                    "value": true
+                },
+                {
+                    "code": "work_mode",
+                    "value": "white"
+                },
+                {
+                    "code": "bright_value_v2",
+                    "value": 1000
+                },
+                {
+                    "code": "temp_value_v2",
+                    "value": 400
+                },
+                {
+                    "code": "colour_data_v2",
+                    "value": "{\"h\":0,\"s\":0,\"v\":1000}"
+                },
+                {
+                    "code": "scene_data_v2",
+                    "value": "{\"scene_num\":1,\"scene_units\":[{\"bright\":200,\"h\":0,\"s\":0,\"temperature\":0,\"unit_change_mode\":\"static\",\"unit_gradient_duration\":13,\"unit_switch_duration\":14,\"v\":0}]}"
+                },
+                {
+                    "code": "countdown_1",
+                    "value": 0
+                },
+                {
+                    "code": "music_data",
+                    "value": ""
+                },
+                {
+                    "code": "control_data",
+                    "value": ""
+                },
+                {
+                    "code": "rhythm_mode",
+                    "value": "AAAAAAA="
+                },
+                {
+                    "code": "sleep_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "wakeup_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "do_not_disturb",
+                    "value": false
+                },
+                {
+                    "code": "remote_switch",
+                    "value": true
+                }
+            ],
+            "sub": false,
+            "time_zone": "+03:00",
+            "uid": "eu17893111923818TgSm",
+            "update_time": 1789391161,
+            "uuid": "475d93ce5ca113e7"
+        },
+        {
+            "active_time": 1789315005,
+            "biz_type": 18,
+            "category": "dj",
+            "create_time": 1787016219,
+            "icon": "smart/icon/bay1597219004677YsAw/5d58d099416e96c6d7c475a2f2ee8697.png",
+            "id": "bff9e459f6049d64c9nzb7",
+            "ip": "62.78.189.90",
+            "lat": "60.24",
+            "local_key": ">atsxk!l'2ve_A+<",
+            "lon": "24.88",
+            "model": "PAR16 4.7W/345lm 827-865+RGB 36D",
+            "name": "KEO",
+            "online": true,
+            "owner_id": "306441096",
+            "product_id": "cawpuqfm0ed5ykfj",
+            "product_name": "PAR16 4.7W/345lm 827-865+RGB 36D 4713881",
+            "status": [
+                {
+                    "code": "switch_led",
+                    "value": true
+                },
+                {
+                    "code": "work_mode",
+                    "value": "white"
+                },
+                {
+                    "code": "bright_value_v2",
+                    "value": 1000
+                },
+                {
+                    "code": "temp_value_v2",
+                    "value": 260
+                },
+                {
+                    "code": "colour_data_v2",
+                    "value": "{\"h\":0,\"s\":0,\"v\":1000}"
+                },
+                {
+                    "code": "scene_data_v2",
+                    "value": "{\"scene_num\":1,\"scene_units\":[{\"bright\":200,\"h\":0,\"s\":0,\"temperature\":0,\"unit_change_mode\":\"static\",\"unit_gradient_duration\":13,\"unit_switch_duration\":14,\"v\":0}]}"
+                },
+                {
+                    "code": "countdown_1",
+                    "value": 0
+                },
+                {
+                    "code": "music_data",
+                    "value": ""
+                },
+                {
+                    "code": "control_data",
+                    "value": ""
+                },
+                {
+                    "code": "rhythm_mode",
+                    "value": "AAAAAAA="
+                },
+                {
+                    "code": "sleep_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "wakeup_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "do_not_disturb",
+                    "value": false
+                },
+                {
+                    "code": "remote_switch",
+                    "value": true
+                }
+            ],
+            "sub": false,
+            "time_zone": "+03:00",
+            "uid": "eu17893111923818TgSm",
+            "update_time": 1789391149,
+            "uuid": "ea8027ad797dba6e"
+        },
+        {
+            "active_time": 1789314914,
+            "biz_type": 18,
+            "category": "dj",
+            "create_time": 1787017303,
+            "icon": "smart/icon/bay1597219004677YsAw/5d58d099416e96c6d7c475a2f2ee8697.png",
+            "id": "bfd20351849713958e3uxb",
+            "ip": "62.78.189.90",
+            "lat": "60.24",
+            "local_key": "-P@i;S?'^rE_#g_`",
+            "lon": "24.88",
+            "model": "PAR16 4.7W/345lm 827-865+RGB 36D",
+            "name": "OO",
+            "online": true,
+            "owner_id": "306441096",
+            "product_id": "cawpuqfm0ed5ykfj",
+            "product_name": "PAR16 4.7W/345lm 827-865+RGB 36D 4713881",
+            "status": [
+                {
+                    "code": "switch_led",
+                    "value": true
+                },
+                {
+                    "code": "work_mode",
+                    "value": "white"
+                },
+                {
+                    "code": "bright_value_v2",
+                    "value": 1000
+                },
+                {
+                    "code": "temp_value_v2",
+                    "value": 400
+                },
+                {
+                    "code": "colour_data_v2",
+                    "value": "{\"h\":0,\"s\":0,\"v\":1000}"
+                },
+                {
+                    "code": "scene_data_v2",
+                    "value": "{\"scene_num\":1,\"scene_units\":[{\"bright\":200,\"h\":0,\"s\":0,\"temperature\":0,\"unit_change_mode\":\"static\",\"unit_gradient_duration\":13,\"unit_switch_duration\":14,\"v\":0}]}"
+                },
+                {
+                    "code": "countdown_1",
+                    "value": 0
+                },
+                {
+                    "code": "music_data",
+                    "value": ""
+                },
+                {
+                    "code": "control_data",
+                    "value": ""
+                },
+                {
+                    "code": "rhythm_mode",
+                    "value": "AAAAAAA="
+                },
+                {
+                    "code": "sleep_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "wakeup_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "do_not_disturb",
+                    "value": false
+                },
+                {
+                    "code": "remote_switch",
+                    "value": true
+                }
+            ],
+            "sub": false,
+            "time_zone": "+03:00",
+            "uid": "eu17893111923818TgSm",
+            "update_time": 1789391149,
+            "uuid": "b9e27e01e7cfa5a9"
+        },
+        {
+            "active_time": 1789314909,
+            "biz_type": 18,
+            "category": "dj",
+            "create_time": 1787017302,
+            "icon": "smart/icon/bay1597219004677YsAw/5d58d099416e96c6d7c475a2f2ee8697.png",
+            "id": "bfed3e0fdaabc22ca7svlk",
+            "ip": "62.78.189.90",
+            "lat": "60.24",
+            "local_key": "I{qDeDm<0w9&QhKO",
+            "lon": "24.88",
+            "model": "PAR16 4.7W/345lm 827-865+RGB 36D",
+            "name": "OV",
+            "online": true,
+            "owner_id": "306441096",
+            "product_id": "cawpuqfm0ed5ykfj",
+            "product_name": "PAR16 4.7W/345lm 827-865+RGB 36D 4713881",
+            "status": [
+                {
+                    "code": "switch_led",
+                    "value": true
+                },
+                {
+                    "code": "work_mode",
+                    "value": "white"
+                },
+                {
+                    "code": "bright_value_v2",
+                    "value": 1000
+                },
+                {
+                    "code": "temp_value_v2",
+                    "value": 770
+                },
+                {
+                    "code": "colour_data_v2",
+                    "value": "{\"h\":0,\"s\":0,\"v\":1000}"
+                },
+                {
+                    "code": "scene_data_v2",
+                    "value": "{\"scene_num\":1,\"scene_units\":[{\"bright\":200,\"h\":0,\"s\":0,\"temperature\":0,\"unit_change_mode\":\"static\",\"unit_gradient_duration\":13,\"unit_switch_duration\":14,\"v\":0}]}"
+                },
+                {
+                    "code": "countdown_1",
+                    "value": 0
+                },
+                {
+                    "code": "music_data",
+                    "value": ""
+                },
+                {
+                    "code": "control_data",
+                    "value": ""
+                },
+                {
+                    "code": "rhythm_mode",
+                    "value": "AAAAAAA="
+                },
+                {
+                    "code": "sleep_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "wakeup_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "do_not_disturb",
+                    "value": false
+                },
+                {
+                    "code": "remote_switch",
+                    "value": true
+                }
+            ],
+            "sub": false,
+            "time_zone": "+03:00",
+            "uid": "eu17893111923818TgSm",
+            "update_time": 1789391149,
+            "uuid": "f1abb67d70cb02b8"
+        },
+        {
+            "active_time": 1789314881,
+            "biz_type": 18,
+            "category": "dj",
+            "create_time": 1787018855,
+            "icon": "smart/icon/bay1597219004677YsAw/5d58d099416e96c6d7c475a2f2ee8697.png",
+            "id": "bf36e128b3fd2a1543zz79",
+            "ip": "62.78.189.90",
+            "lat": "60.24",
+            "local_key": "x~9ra7I6+K^QpkV<",
+            "lon": "24.88",
+            "model": "PAR16 4.7W/345lm 827-865+RGB 36D",
+            "name": "VV",
+            "online": true,
+            "owner_id": "306441096",
+            "product_id": "cawpuqfm0ed5ykfj",
+            "product_name": "PAR16 4.7W/345lm 827-865+RGB 36D 4713881",
+            "status": [
+                {
+                    "code": "switch_led",
+                    "value": true
+                },
+                {
+                    "code": "work_mode",
+                    "value": "white"
+                },
+                {
+                    "code": "bright_value_v2",
+                    "value": 1000
+                },
+                {
+                    "code": "temp_value_v2",
+                    "value": 40
+                },
+                {
+                    "code": "colour_data_v2",
+                    "value": "{\"h\":120,\"s\":1000,\"v\":1000}"
+                },
+                {
+                    "code": "scene_data_v2",
+                    "value": "{\"scene_num\":1,\"scene_units\":[{\"bright\":200,\"h\":0,\"s\":0,\"temperature\":0,\"unit_change_mode\":\"static\",\"unit_gradient_duration\":13,\"unit_switch_duration\":14,\"v\":0}]}"
+                },
+                {
+                    "code": "countdown_1",
+                    "value": 0
+                },
+                {
+                    "code": "music_data",
+                    "value": ""
+                },
+                {
+                    "code": "control_data",
+                    "value": ""
+                },
+                {
+                    "code": "rhythm_mode",
+                    "value": "AAAAAAA="
+                },
+                {
+                    "code": "sleep_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "wakeup_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "do_not_disturb",
+                    "value": false
+                },
+                {
+                    "code": "remote_switch",
+                    "value": true
+                }
+            ],
+            "sub": false,
+            "time_zone": "+03:00",
+            "uid": "eu17893111923818TgSm",
+            "update_time": 1789391149,
+            "uuid": "3db007501997301b"
+        },
+        {
+            "active_time": 1789315018,
+            "biz_type": 18,
+            "category": "dj",
+            "create_time": 1787016240,
+            "icon": "smart/icon/bay1597219004677YsAw/5d58d099416e96c6d7c475a2f2ee8697.png",
+            "id": "bf1c86a9712d4d914abydk",
+            "ip": "62.78.189.90",
+            "lat": "60.24",
+            "local_key": "xMDb9EW;iLBExyQK",
+            "lon": "24.88",
+            "model": "PAR16 4.7W/345lm 827-865+RGB 36D",
+            "name": "KTO",
+            "online": true,
+            "owner_id": "306441096",
+            "product_id": "cawpuqfm0ed5ykfj",
+            "product_name": "PAR16 4.7W/345lm 827-865+RGB 36D 4713881",
+            "status": [
+                {
+                    "code": "switch_led",
+                    "value": true
+                },
+                {
+                    "code": "work_mode",
+                    "value": "white"
+                },
+                {
+                    "code": "bright_value_v2",
+                    "value": 1000
+                },
+                {
+                    "code": "temp_value_v2",
+                    "value": 930
+                },
+                {
+                    "code": "colour_data_v2",
+                    "value": "{\"h\":0,\"s\":0,\"v\":1000}"
+                },
+                {
+                    "code": "scene_data_v2",
+                    "value": "{\"scene_num\":1,\"scene_units\":[{\"bright\":200,\"h\":0,\"s\":0,\"temperature\":0,\"unit_change_mode\":\"static\",\"unit_gradient_duration\":13,\"unit_switch_duration\":14,\"v\":0}]}"
+                },
+                {
+                    "code": "countdown_1",
+                    "value": 0
+                },
+                {
+                    "code": "music_data",
+                    "value": ""
+                },
+                {
+                    "code": "control_data",
+                    "value": ""
+                },
+                {
+                    "code": "rhythm_mode",
+                    "value": "AAAAAAA="
+                },
+                {
+                    "code": "sleep_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "wakeup_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "do_not_disturb",
+                    "value": false
+                },
+                {
+                    "code": "remote_switch",
+                    "value": true
+                }
+            ],
+            "sub": false,
+            "time_zone": "+03:00",
+            "uid": "eu17893111923818TgSm",
+            "update_time": 1789391081,
+            "uuid": "f0abb9e2cd1f2efa"
+        },
+        {
+            "active_time": 1789314902,
+            "biz_type": 18,
+            "category": "dj",
+            "create_time": 1787018853,
+            "icon": "smart/icon/bay1597219004677YsAw/5d58d099416e96c6d7c475a2f2ee8697.png",
+            "id": "bf83e08153a9f48b11qlok",
+            "ip": "62.78.189.90",
+            "lat": "60.24",
+            "local_key": "Jqftclo?4^=^m0_L",
+            "lon": "24.88",
+            "model": "PAR16 4.7W/345lm 827-865+RGB 36D",
+            "name": "VO",
+            "online": true,
+            "owner_id": "306441096",
+            "product_id": "cawpuqfm0ed5ykfj",
+            "product_name": "PAR16 4.7W/345lm 827-865+RGB 36D 4713881",
+            "status": [
+                {
+                    "code": "switch_led",
+                    "value": true
+                },
+                {
+                    "code": "work_mode",
+                    "value": "white"
+                },
+                {
+                    "code": "bright_value_v2",
+                    "value": 1000
+                },
+                {
+                    "code": "temp_value_v2",
+                    "value": 970
+                },
+                {
+                    "code": "colour_data_v2",
+                    "value": "{\"h\":0,\"s\":0,\"v\":1000}"
+                },
+                {
+                    "code": "scene_data_v2",
+                    "value": "{\"scene_num\":1,\"scene_units\":[{\"bright\":200,\"h\":0,\"s\":0,\"temperature\":0,\"unit_change_mode\":\"static\",\"unit_gradient_duration\":13,\"unit_switch_duration\":14,\"v\":0}]}"
+                },
+                {
+                    "code": "countdown_1",
+                    "value": 0
+                },
+                {
+                    "code": "music_data",
+                    "value": ""
+                },
+                {
+                    "code": "control_data",
+                    "value": ""
+                },
+                {
+                    "code": "rhythm_mode",
+                    "value": "AAAAAAA="
+                },
+                {
+                    "code": "sleep_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "wakeup_mode",
+                    "value": "AAA="
+                },
+                {
+                    "code": "do_not_disturb",
+                    "value": false
+                },
+                {
+                    "code": "remote_switch",
+                    "value": true
+                }
+            ],
+            "sub": false,
+            "time_zone": "+03:00",
+            "uid": "eu17893111923818TgSm",
+            "update_time": 1789390916,
+            "uuid": "5f0024fa77a5e230"
+        }
+    ],
+    "success": true,
+    "t": 1789391227691,
+    "tid": "30539123b03d11f1bfd1d6dbc6e5ffad",
+    "file": {
+        "name": "tuya-raw.json",
+        "description": "Full raw list of Tuya devices.",
+        "account": "uy9puttup79c9e9a85q4",
+        "date": "2026-09-14T16:07:07.742833",
+        "tinytuya": "1.20.0"
+    }
+}
