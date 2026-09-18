@@ -649,11 +649,19 @@ class VisualizationEngine:
             return colors  # need at least 2 chase positions for a chase to mean anything
 
         beat_energy = None
-        if cfg.sync_to_beat:
+        intensity_energy = None
+        if cfg.sync_mode == "beat":
             beat_energy = band_energy(frame, cfg.beat_detect_low_hz, cfg.beat_detect_high_hz)
+        elif cfg.sync_mode == "intensity_peak":
+            intensity_energy = band_energy(frame, cfg.peak_detect_low_hz, cfg.peak_detect_high_hz)
 
         dwell_weights = get_chase_group_dwell_weights(self.config.per_lamp_effects, groups)
         self._chase_animator.tick(
-            dt, num_positions=len(groups), beat_band_energy=beat_energy, now_s=wall_now, dwell_weights=dwell_weights
+            dt,
+            num_positions=len(groups),
+            beat_band_energy=beat_energy,
+            intensity_energy=intensity_energy,
+            now_s=wall_now,
+            dwell_weights=dwell_weights,
         )
         return self._chase_animator.apply(colors, groups)

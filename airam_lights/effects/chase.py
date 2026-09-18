@@ -132,6 +132,11 @@ class ChaseAnimator:
             min_interval_ms=config.beat_min_interval_ms,
             min_energy=config.beat_min_energy,
         )
+        self._peak_detector = BeatDetector(
+            sensitivity=config.peak_sensitivity,
+            min_interval_ms=config.peak_min_interval_ms,
+            min_energy=config.peak_min_energy,
+        )
 
     @property
     def position(self) -> float:
@@ -154,16 +159,21 @@ class ChaseAnimator:
         self._beat_detector.sensitivity = config.beat_sensitivity
         self._beat_detector.min_interval_ms = config.beat_min_interval_ms
         self._beat_detector.min_energy = config.beat_min_energy
+        self._peak_detector.sensitivity = config.peak_sensitivity
+        self._peak_detector.min_interval_ms = config.peak_min_interval_ms
+        self._peak_detector.min_energy = config.peak_min_energy
 
     def reset(self) -> None:
         self.position = 0.0
         self._beat_detector.reset()
+        self._peak_detector.reset()
 
     def tick(
         self,
         dt: float,
         num_positions: int,
         beat_band_energy: Optional[float] = None,
+        intensity_energy: Optional[float] = None,
         now_s: Optional[float] = None,
         dwell_weights: Optional[Sequence[float]] = None,
     ) -> None:
@@ -172,33 +182,50 @@ class ChaseAnimator:
         change over time as lamps are added/removed from the chase without
         breaking anything.
 
-        `beat_band_energy` + `now_s`: pass these (from the caller's own band
-        energy extraction) to enable `sync_to_beat`. Omit them (as the
-        no-audio manual app does) and the chase always falls back to its
-        constant `speed_rotations_per_s`, even if `sync_to_beat` is set in
-        the shared config - it simply has no beat signal to sync to.
+        sync_mode == "off": advances continuously at the constant
+        `speed_rotations_per_s`, every tick, same as always.
+
+        sync_mode == "beat" / "intensity_peak": purely event-driven. The
+        position does NOT move on its own between hits - it only jumps
+        `beat_multiplier` lamp-steps on the exact tick a beat/peak is
+        detected in `beat_band_energy`/`intensity_energy`. An earlier
+        version instead estimated a rolling tempo and rotated continuously
+        at that estimate, which kept the highlight gliding on its own
+        between hits (and even after the music stopped, on the last
+        estimate) - looking like it spins with no audible rhythm behind it.
+        Never moving except on an actual hit is what fixes that.
+
+        `beat_band_energy`/`intensity_energy` + `now_s`: pass these (from
+        the caller's own band energy extraction) to enable "beat"/
+        "intensity_peak" respectively. Without a `now_s` at all (as the
+        no-audio manual app does, since it has nothing to sync to), both
+        modes fall back to the same constant `speed_rotations_per_s` as
+        "off" - there is no rhythm signal available to wait for, so standing
+        still forever would just look broken there instead.
 
         `dwell_weights`: optional per-position dwell-time multipliers (see
         `get_chase_group_dwell_weights`), same length/order as `groups`.
-        The position's advance rate is locally divided by the weight of
-        whichever position it is currently nearest to, so a weight of 2.0
-        makes the highlight spend roughly twice as long around that
-        position; 1.0 (or omitting this entirely) reproduces the original,
-        perfectly uniform dwell time.
+        In "off" mode (or the no-`now_s` fallback above) this scales the
+        continuous speed, exactly as before; in the event-driven modes it
+        scales the size of each discrete hit-triggered step instead, so a
+        higher-dwell position still ends up "held" relatively longer across
+        many hits.
         """
         cfg = self.config
         n = max(1, num_positions)
         direction = -1.0 if cfg.reverse else 1.0
+        local_dwell = _local_dwell_weight(self._position, n, dwell_weights)
 
-        if cfg.sync_to_beat and beat_band_energy is not None and now_s is not None:
-            self._beat_detector.update(beat_band_energy, now_s)
-            interval = self._beat_detector.average_interval_s()
-            steps_per_s = (cfg.beat_multiplier / interval) if interval and interval > 0.02 else cfg.speed_rotations_per_s * n
+        if cfg.sync_mode == "beat" and now_s is not None:
+            triggered = beat_band_energy is not None and self._beat_detector.update(beat_band_energy, now_s)
+            delta = direction * cfg.beat_multiplier / local_dwell if triggered else 0.0
+        elif cfg.sync_mode == "intensity_peak" and now_s is not None:
+            triggered = intensity_energy is not None and self._peak_detector.update(intensity_energy, now_s)
+            delta = direction * cfg.beat_multiplier / local_dwell if triggered else 0.0
         else:
             steps_per_s = cfg.speed_rotations_per_s * n
+            delta = direction * steps_per_s * dt / local_dwell
 
-        local_dwell = _local_dwell_weight(self._position, n, dwell_weights)
-        delta = direction * steps_per_s * dt / local_dwell
         self._sweep_start = self._position
         self._sweep_end = self._position + delta
         self._position = self._sweep_end % n  # bypass the setter: keep the sweep just computed

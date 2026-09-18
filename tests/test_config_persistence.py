@@ -88,9 +88,11 @@ def _build_fully_populated_config() -> AppConfig:
     )
 
     chase = ChaseEffectConfig(
-        enabled=True, num_rotators=2, speed_rotations_per_s=0.44, sync_to_beat=True,
+        enabled=True, num_rotators=2, speed_rotations_per_s=0.44, sync_mode="beat",
         beat_multiplier=1.5, beat_detect_low_hz=42.0, beat_detect_high_hz=202.0,
-        beat_sensitivity=1.62, beat_min_interval_ms=123.0, beat_min_energy=0.15, width=0.61,
+        beat_sensitivity=1.62, beat_min_interval_ms=123.0, beat_min_energy=0.15,
+        peak_detect_low_hz=22.0, peak_detect_high_hz=15800.0, peak_sensitivity=1.35,
+        peak_min_interval_ms=65.0, peak_min_energy=0.09, width=0.61,
         intensity=3.3, falloff_curve="bezier", color_mode="hue_shift", custom_hue_deg=281.0,
         custom_saturation=0.92, hue_shift_step_deg=46.0,
     )
