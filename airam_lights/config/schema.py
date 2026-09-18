@@ -548,11 +548,26 @@ class ChaseEffectConfig:
 
     Speed is either a constant number of full rotations per second
     (`speed_rotations_per_s` - e.g. 0.5 means one full lap around the chase
-    order every 2 seconds), or, when `sync_to_beat` is on, driven by the
-    live-measured beat interval from its own independent beat detector:
-    `beat_multiplier=1` means the highlight advances exactly one lamp-step
-    per beat, `2` means two steps per beat (twice as fast), `0.5` means one
-    step every two beats (half as fast) - no music-theory knowledge needed.
+    order every 2 seconds), or, when `sync_mode` is "beat" or
+    "intensity_peak", purely event-driven: the highlight sits still and only
+    advances `beat_multiplier` lamp-steps the instant a beat/peak is
+    detected - `beat_multiplier=1` means one step per hit, `2` means two
+    steps per hit (twice as fast), `0.5` means one step every two hits (half
+    as fast) - no music-theory knowledge needed.
+
+    This is deliberately NOT "estimate a tempo, then rotate continuously at
+    that speed": an earlier version did that, and it meant the chase kept
+    gliding on its own between hits (and even after the music went quiet, on
+    whatever tempo it last estimated) - looking like it was "spinning on its
+    own" with no audible rhythm behind it. Sitting still until the next
+    actual hit is what makes it read as driven by the music.
+
+    "beat" reacts to a specific low-frequency band (`beat_detect_*`, tuned
+    for kick drums by default) via its own independent detector. "intensity_
+    peak" instead reacts to ANY sudden broadband loudness spike (`peak_
+    detect_*`, wide by default) via a second, separately-tuned detector -
+    useful for tracks without a strong, steady bass beat. Both share
+    `beat_multiplier` for how far each hit advances the highlight.
 
     The highlight only ever *modulates* whatever the active color mode is
     already showing on that lamp - crucially, brightness is a multiplicative
@@ -566,18 +581,28 @@ class ChaseEffectConfig:
     num_rotators: int = 1  # how many highlights travel the loop at once, evenly spaced
     # (e.g. 2 = two highlights on opposite sides of the loop, both moving together)
 
-    speed_rotations_per_s: float = 0.3  # constant speed when not synced to beat: full loops/second
+    speed_rotations_per_s: float = 0.3  # constant speed when sync_mode == "off": full loops/second
     reverse: bool = False  # flips which way the highlight travels around the chase order
-    sync_to_beat: bool = False
-    beat_multiplier: float = 1.0  # lamp-steps advanced per detected beat, when synced
+    sync_mode: str = "off"  # "off" (constant speed) | "beat" | "intensity_peak"
+    beat_multiplier: float = 1.0  # lamp-steps advanced per detected beat/peak, when synced
 
     # The chase's own independent beat detector (works regardless of which
-    # color mode/its own beat detector, if any, is active).
+    # color mode/its own beat detector, if any, is active). Used when
+    # sync_mode == "beat".
     beat_detect_low_hz: float = 40.0
     beat_detect_high_hz: float = 200.0
     beat_sensitivity: float = 1.6
     beat_min_interval_ms: float = 120.0
     beat_min_energy: float = 0.12
+
+    # A second, independent detector for sync_mode == "intensity_peak" -
+    # deliberately wide-band by default (same idea as Peak Flash mode) so
+    # ANY sudden loudness spike advances the chase, not just bass hits.
+    peak_detect_low_hz: float = 20.0
+    peak_detect_high_hz: float = 16000.0
+    peak_sensitivity: float = 1.3
+    peak_min_interval_ms: float = 60.0
+    peak_min_energy: float = 0.08
 
     width: float = 0.7  # how many lamp-positions wide the highlight is (soft falloff) - smaller = crisper single-lamp look
     intensity: float = 3.0  # brightness boost multiplier at the highlight's peak (base 0 always stays 0)
@@ -606,18 +631,29 @@ class ChaseEffectConfig:
         # Backward-compat: earlier builds used "speed_steps_per_s" (steps/second,
         # not rotations/second) - if only the old key is present, ignore it and
         # fall back to the new default rather than silently misinterpreting units.
+        # Also backward-compat: earlier builds had a boolean "sync_to_beat"
+        # instead of today's 3-way "sync_mode" - translate it if that's all an
+        # old saved file has.
+        sync_mode = d.get("sync_mode")
+        if sync_mode not in ("off", "beat", "intensity_peak"):
+            sync_mode = "beat" if d.get("sync_to_beat", False) else "off"
         return cls(
             enabled=bool(d.get("enabled", False)),
             num_rotators=int(d.get("num_rotators", 1)),
             speed_rotations_per_s=float(d.get("speed_rotations_per_s", 0.3)),
             reverse=bool(d.get("reverse", False)),
-            sync_to_beat=bool(d.get("sync_to_beat", False)),
+            sync_mode=sync_mode,
             beat_multiplier=float(d.get("beat_multiplier", 1.0)),
             beat_detect_low_hz=float(d.get("beat_detect_low_hz", 40.0)),
             beat_detect_high_hz=float(d.get("beat_detect_high_hz", 200.0)),
             beat_sensitivity=float(d.get("beat_sensitivity", 1.6)),
             beat_min_interval_ms=float(d.get("beat_min_interval_ms", 120.0)),
             beat_min_energy=float(d.get("beat_min_energy", 0.12)),
+            peak_detect_low_hz=float(d.get("peak_detect_low_hz", 20.0)),
+            peak_detect_high_hz=float(d.get("peak_detect_high_hz", 16000.0)),
+            peak_sensitivity=float(d.get("peak_sensitivity", 1.3)),
+            peak_min_interval_ms=float(d.get("peak_min_interval_ms", 60.0)),
+            peak_min_energy=float(d.get("peak_min_energy", 0.08)),
             width=float(d.get("width", 0.7)),
             intensity=float(d.get("intensity", 3.0)),
             falloff_curve=d.get("falloff_curve", "linear"),

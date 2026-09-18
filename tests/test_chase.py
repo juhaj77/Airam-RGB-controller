@@ -305,3 +305,99 @@ def test_white_chase_dwell_weight_slows_down_local_travel():
     slowed.tick(dt=0.05, num_positions=6, dwell_weights=weights)
 
     assert 0.0 < slowed.position < baseline.position
+
+
+# -- sync_mode: "beat" / "intensity_peak" (event-driven speed) -----------------------------
+#
+# Regression coverage for the reported bug: an earlier version estimated a
+# rolling tempo from recent beats and rotated CONTINUOUSLY at that estimate,
+# which kept the highlight gliding on its own between hits (and even after
+# the music went quiet, on the last estimate) - it looked like it was
+# spinning with no audible rhythm behind it. These modes must now do nothing
+# at all except jump exactly `beat_multiplier` steps on the tick a beat/peak
+# is actually detected.
+
+
+def test_sync_beat_mode_never_drifts_between_hits_and_steps_on_each_one():
+    # speed_rotations_per_s is deliberately huge - if any fallback/continuous
+    # path were still reachable in "beat" mode, it would show up immediately
+    # as movement with no beat, since it dwarfs one legitimate per-beat step.
+    cfg = ChaseEffectConfig(sync_mode="beat", beat_multiplier=1.0, speed_rotations_per_s=5.0)
+    animator = ChaseAnimator(cfg)
+    dt = 1.0 / 30.0
+    t = 0.0
+
+    # Quiet priming samples, all below min_energy (0.12 default) - must never trigger.
+    for _ in range(6):
+        animator.tick(dt, num_positions=8, beat_band_energy=0.05, now_s=t)
+        t += dt
+    assert animator.position == 0.0  # no beat yet -> must not have moved AT ALL
+
+    animator.tick(dt, num_positions=8, beat_band_energy=0.9, now_s=t)  # one genuine beat
+    t += dt
+    assert animator.position == 1.0  # exactly one lamp-step, matching beat_multiplier
+
+    for _ in range(10):  # back to quiet - must hold, not keep gliding
+        animator.tick(dt, num_positions=8, beat_band_energy=0.05, now_s=t)
+        t += dt
+    assert animator.position == 1.0
+
+
+def test_sync_intensity_peak_mode_steps_on_detected_peak_only():
+    cfg = ChaseEffectConfig(sync_mode="intensity_peak", beat_multiplier=2.0, speed_rotations_per_s=5.0)
+    animator = ChaseAnimator(cfg)
+    dt = 1.0 / 30.0
+    t = 0.0
+
+    for _ in range(6):  # below peak_min_energy (0.08 default) - must never trigger
+        animator.tick(dt, num_positions=8, intensity_energy=0.03, now_s=t)
+        t += dt
+    assert animator.position == 0.0
+
+    animator.tick(dt, num_positions=8, intensity_energy=0.9, now_s=t)  # one genuine peak
+    t += dt
+    assert animator.position == 2.0  # matches beat_multiplier
+
+    for _ in range(10):
+        animator.tick(dt, num_positions=8, intensity_energy=0.03, now_s=t)
+        t += dt
+    assert animator.position == 2.0
+
+
+def test_sync_beat_mode_ignores_intensity_energy_and_vice_versa():
+    """The two sync modes must each react only to their own signal - beat
+    mode ignores intensity_energy, and intensity_peak mode ignores
+    beat_band_energy - confirming they're wired to independent detectors."""
+    beat_mode = ChaseAnimator(ChaseEffectConfig(sync_mode="beat", beat_multiplier=1.0))
+    peak_mode = ChaseAnimator(ChaseEffectConfig(sync_mode="intensity_peak", beat_multiplier=1.0))
+
+    beat_mode.tick(dt=1.0, num_positions=8, intensity_energy=0.9, now_s=0.0)
+    peak_mode.tick(dt=1.0, num_positions=8, beat_band_energy=0.9, now_s=0.0)
+
+    assert beat_mode.position == 0.0
+    assert peak_mode.position == 0.0
+
+
+def test_sync_mode_falls_back_to_constant_speed_when_no_time_context_given():
+    """The no-audio manual app never passes now_s at all (nothing to sync
+    to) - "beat"/"intensity_peak" must fall back to the same constant speed
+    as "off" there, rather than freezing forever."""
+    off_animator = ChaseAnimator(ChaseEffectConfig(sync_mode="off", speed_rotations_per_s=1.0))
+    beat_animator = ChaseAnimator(ChaseEffectConfig(sync_mode="beat", speed_rotations_per_s=1.0))
+    peak_animator = ChaseAnimator(ChaseEffectConfig(sync_mode="intensity_peak", speed_rotations_per_s=1.0))
+
+    off_animator.tick(dt=0.2, num_positions=8)
+    beat_animator.tick(dt=0.2, num_positions=8)  # no now_s/beat_band_energy at all
+    peak_animator.tick(dt=0.2, num_positions=8)
+
+    assert off_animator.position > 0.0
+    assert beat_animator.position == off_animator.position
+    assert peak_animator.position == off_animator.position
+
+
+def test_chase_sync_mode_backward_compatible_with_old_boolean_field():
+    assert ChaseEffectConfig().sync_mode == "off"
+    assert ChaseEffectConfig.from_dict({}).sync_mode == "off"
+    assert ChaseEffectConfig.from_dict({"sync_to_beat": True}).sync_mode == "beat"
+    assert ChaseEffectConfig.from_dict({"sync_to_beat": False}).sync_mode == "off"
+    assert ChaseEffectConfig.from_dict({"sync_mode": "intensity_peak"}).sync_mode == "intensity_peak"
