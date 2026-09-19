@@ -105,12 +105,12 @@ class ColorMappingTab(QWidget):
         ):
             w.valueChanged.connect(self._on_hsv_changed)
             hsv_layout.addWidget(w)
-        hsv_layout.addWidget(
-            QLabel(
-                "Hue follows the spectral centroid (frequency distribution), brightness "
-                "follows overall energy, saturation follows spectral contrast (peaky vs. flat)."
-            )
+        hsv_desc_label = QLabel(
+            "Hue follows the spectral centroid (frequency distribution), brightness "
+            "follows overall energy, saturation follows spectral contrast (peaky vs. flat)."
         )
+        hsv_desc_label.setWordWrap(True)
+        hsv_layout.addWidget(hsv_desc_label)
         sub_tabs.addTab(hsv_widget, "HSV Music")
 
         # -- Beat Sync mode -----------------------------------------------------------
@@ -133,7 +133,9 @@ class ColorMappingTab(QWidget):
         detect_row.addWidget(self.beat_high_spin)
         detect_row.addStretch(1)
         beat_layout.addLayout(detect_row)
-        beat_layout.addWidget(QLabel("Default 40-200 Hz targets kick drums; widen it to react to more of the mix."))
+        beat_band_note = QLabel("Default 40-200 Hz targets kick drums; widen it to react to more of the mix.")
+        beat_band_note.setWordWrap(True)
+        beat_layout.addWidget(beat_band_note)
 
         self.beat_sensitivity_slider = FloatSlider("Sensitivity", 1.05, 4.0, bs.sensitivity, decimals=2)
         self.beat_min_interval_slider = FloatSlider("Min interval", 30.0, 1000.0, bs.min_interval_ms, decimals=0, suffix=" ms")
@@ -141,9 +143,9 @@ class ColorMappingTab(QWidget):
         for w in (self.beat_sensitivity_slider, self.beat_min_interval_slider, self.beat_min_energy_slider):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
-        beat_layout.addWidget(
-            QLabel("Lower sensitivity / higher min-interval = fewer, more confident beat triggers.")
-        )
+        beat_sensitivity_note = QLabel("Lower sensitivity / higher min-interval = fewer, more confident beat triggers.")
+        beat_sensitivity_note.setWordWrap(True)
+        beat_layout.addWidget(beat_sensitivity_note)
 
         hue_row = QHBoxLayout()
         hue_row.addWidget(QLabel("Hue mode:"))
@@ -154,13 +156,13 @@ class ColorMappingTab(QWidget):
         hue_row.addWidget(self.beat_hue_mode_combo)
         hue_row.addStretch(1)
         beat_layout.addLayout(hue_row)
-        beat_layout.addWidget(
-            QLabel(
-                "random: a fresh, sufficiently-different color every hit. step: cycles through the color "
-                "wheel by a fixed angle each hit (never repeats for a long time). spectrum: hue follows "
-                "the spectral centroid at the moment of the hit."
-            )
+        beat_hue_mode_note = QLabel(
+            "random: a fresh, sufficiently-different color every hit. step: cycles through the color "
+            "wheel by a fixed angle each hit (never repeats for a long time). spectrum: hue follows "
+            "the spectral centroid at the moment of the hit."
         )
+        beat_hue_mode_note.setWordWrap(True)
+        beat_layout.addWidget(beat_hue_mode_note)
 
         self.beat_hue_step_slider = FloatSlider("Hue step (for 'step')", 1.0, 180.0, bs.hue_step_deg, decimals=1, suffix=" deg")
         self.beat_min_jump_slider = FloatSlider("Min hue jump (for 'random')", 0.0, 180.0, bs.min_hue_jump_deg, decimals=0, suffix=" deg")
@@ -183,12 +185,12 @@ class ColorMappingTab(QWidget):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
 
-        beat_layout.addWidget(
-            QLabel(
-                "Dark pulses: on a random subset of beats, briefly dip toward black BEFORE flashing - "
-                "a rhythm-synced pause/strobe accent, on top of the hue and brightness above."
-            )
+        beat_dark_note = QLabel(
+            "Dark pulses: on a random subset of beats, briefly dip toward black BEFORE flashing - "
+            "a rhythm-synced pause/strobe accent, on top of the hue and brightness above."
         )
+        beat_dark_note.setWordWrap(True)
+        beat_layout.addWidget(beat_dark_note)
         self.beat_dark_prob_slider = FloatSlider("Dark pulse probability", 0.0, 1.0, bs.dark_pulse_probability, decimals=2)
         self.beat_dark_duration_slider = FloatSlider(
             "Dark pulse duration", 10.0, 500.0, bs.dark_pulse_duration_ms, decimals=0, suffix=" ms"
@@ -207,14 +209,14 @@ class ColorMappingTab(QWidget):
         bsw_widget = QWidget()
         bsw_layout = QVBoxLayout(bsw_widget)
         bsw = cm.beat_sync_white
-        bsw_layout.addWidget(
-            QLabel(
-                "Same rhythm-reactive envelope as Beat Sync, but drives the bulb's WHITE work_mode "
-                "(brightness + color temperature) instead of RGB - warm/cool flashes on the beat. "
-                "See DEVICE_NOTES.md: the underlying set_white() call is not yet independently "
-                "confirmed against the physical bulbs the way RGB is."
-            )
+        bsw_desc_label = QLabel(
+            "Same rhythm-reactive envelope as Beat Sync, but drives the bulb's WHITE work_mode "
+            "(brightness + color temperature) instead of RGB - warm/cool flashes on the beat. "
+            "See DEVICE_NOTES.md: the underlying set_white() call is not yet independently "
+            "confirmed against the physical bulbs the way RGB is."
         )
+        bsw_desc_label.setWordWrap(True)
+        bsw_layout.addWidget(bsw_desc_label)
 
         bsw_detect_row = QHBoxLayout()
         bsw_detect_row.addWidget(QLabel("Beat detection band:"))
@@ -248,9 +250,11 @@ class ColorMappingTab(QWidget):
         bsw_temp_mode_row.addWidget(self.bsw_temp_mode_combo)
         bsw_temp_mode_row.addStretch(1)
         bsw_layout.addLayout(bsw_temp_mode_row)
-        bsw_layout.addWidget(
-            QLabel("random: a new temperature every hit. alternate: ping-pongs between the warm and cool ends.")
+        bsw_temp_mode_note = QLabel(
+            "random: a new temperature every hit. alternate: ping-pongs between the warm and cool ends."
         )
+        bsw_temp_mode_note.setWordWrap(True)
+        bsw_layout.addWidget(bsw_temp_mode_note)
 
         self.bsw_temp_min_slider = FloatSlider("Temp range min (warm)", 0.0, 1.0, bsw.temp_min, decimals=2)
         self.bsw_temp_max_slider = FloatSlider("Temp range max (cool)", 0.0, 1.0, bsw.temp_max, decimals=2)
@@ -273,7 +277,9 @@ class ColorMappingTab(QWidget):
             w.valueChanged.connect(self._on_beat_white_changed)
             bsw_layout.addWidget(w)
 
-        bsw_layout.addWidget(QLabel("Dark pulses: same as Beat Sync - a rhythm-synced pause toward black before flashing."))
+        bsw_dark_note = QLabel("Dark pulses: same as Beat Sync - a rhythm-synced pause toward black before flashing.")
+        bsw_dark_note.setWordWrap(True)
+        bsw_layout.addWidget(bsw_dark_note)
         self.bsw_dark_prob_slider = FloatSlider("Dark pulse probability", 0.0, 1.0, bsw.dark_pulse_probability, decimals=2)
         self.bsw_dark_duration_slider = FloatSlider(
             "Dark pulse duration", 10.0, 500.0, bsw.dark_pulse_duration_ms, decimals=0, suffix=" ms"
@@ -293,14 +299,14 @@ class ColorMappingTab(QWidget):
         peak_layout = QVBoxLayout(peak_widget)
         pf = cm.peak_flash
 
-        peak_layout.addWidget(
-            QLabel(
-                "Reacts to ANY sudden loudness spike (broadband, not just bass), flashes toward "
-                "white on strong treble/cymbals, and shows fully-saturated color the rest of the "
-                "time. Hue flows continuously and slowly instead of snapping - a smooth 'storytelling' "
-                "color arc rather than discrete jumps."
-            )
+        peak_desc_label = QLabel(
+            "Reacts to ANY sudden loudness spike (broadband, not just bass), flashes toward "
+            "white on strong treble/cymbals, and shows fully-saturated color the rest of the "
+            "time. Hue flows continuously and slowly instead of snapping - a smooth 'storytelling' "
+            "color arc rather than discrete jumps."
         )
+        peak_desc_label.setWordWrap(True)
+        peak_layout.addWidget(peak_desc_label)
 
         peak_detect_row = QHBoxLayout()
         peak_detect_row.addWidget(QLabel("Peak detection band:"))
@@ -391,14 +397,14 @@ class ColorMappingTab(QWidget):
             w.valueChanged.connect(self._on_peak_changed)
             peak_layout.addWidget(w)
             if w is self.peak_random_range_slider:
-                peak_layout.addWidget(
-                    QLabel(
-                        "Randomness factor: on each detected peak, this is the chance the hue takes a "
-                        "random jump (synced to the music) instead of just flowing smoothly - 0 = never "
-                        "jumps, 1 = jumps on every peak. The jump still eases in via 'Color richness' above, "
-                        "and persists (the story continues from the new hue)."
-                    )
+                peak_randomness_note = QLabel(
+                    "Randomness factor: on each detected peak, this is the chance the hue takes a "
+                    "random jump (synced to the music) instead of just flowing smoothly - 0 = never "
+                    "jumps, 1 = jumps on every peak. The jump still eases in via 'Color richness' above, "
+                    "and persists (the story continues from the new hue)."
                 )
+                peak_randomness_note.setWordWrap(True)
+                peak_layout.addWidget(peak_randomness_note)
 
         for spin in (self.peak_low_spin, self.peak_high_spin, self.peak_treble_low_spin, self.peak_treble_high_spin):
             spin.valueChanged.connect(self._on_peak_changed)
@@ -423,17 +429,17 @@ class ColorMappingTab(QWidget):
         )
         self.threshold_slider.valueChanged.connect(self._on_threshold_changed)
         global_layout.addWidget(self.threshold_slider)
-        global_layout.addWidget(
-            QLabel("Lamp updates smaller than this (0..1 per channel) are skipped to reduce network traffic.")
-        )
+        threshold_note = QLabel("Lamp updates smaller than this (0..1 per channel) are skipped to reduce network traffic.")
+        threshold_note.setWordWrap(True)
+        global_layout.addWidget(threshold_note)
 
         self.invert_checkbox = QCheckBox("Invert brightness (0 = bright, 1 = black)")
         self.invert_checkbox.setChecked(cm.invert_brightness)
         self.invert_checkbox.toggled.connect(self._on_invert_changed)
         global_layout.addWidget(self.invert_checkbox)
-        global_layout.addWidget(
-            QLabel("Applies to every mode - flips the brightness response so quiet/dark moments light up instead.")
-        )
+        invert_note = QLabel("Applies to every mode - flips the brightness response so quiet/dark moments light up instead.")
+        invert_note.setWordWrap(True)
+        global_layout.addWidget(invert_note)
 
         root.addWidget(global_box)
 
