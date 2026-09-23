@@ -11,7 +11,7 @@ import math
 from typing import Dict, List, Optional, Sequence
 
 from ..color.models import Color, WhiteTarget, circular_lerp_deg, clip, lerp
-from ..config.schema import ChaseEffectConfig, PerLampEffect, WhiteChaseEffectConfig
+from ..config.schema import ChaseEffectConfig, GroupSwitchEffectConfig, PerLampEffect, WhiteChaseEffectConfig
 from ..dsp.beat_detector import BeatDetector
 
 
@@ -76,23 +76,43 @@ def _local_dwell_weight(position: float, n: int, dwell_weights: Optional[Sequenc
     return max(dwell_weights[idx], 0.05)
 
 
-def get_chase_groups(per_lamp_effects: Dict[str, PerLampEffect], selected_ids: Sequence[str]) -> List[List[str]]:
-    """Groups the given lamps by their PerLampEffect.chase_order, ascending.
+def get_effect_order_groups(
+    per_lamp_effects: Dict[str, PerLampEffect], selected_ids: Sequence[str], order_attr: str
+) -> List[List[str]]:
+    """Groups the given lamps by an ordinal-valued PerLampEffect attribute
+    (named by `order_attr`), ascending - the shared mechanism behind both
+    `get_chase_groups()` (keyed on `chase_order`) and
+    `get_group_switch_groups()` (keyed on `effect_group`).
 
     Lamps that share the same order number end up in the same group and
-    always animate together as one "position" - this is what makes the
-    chase work for physical layouts that aren't a single ring (e.g. two
+    always animate together as one "position" - this is what makes either
+    overlay work for physical layouts that aren't a single ring (e.g. two
     lamps on each of four walls: give each wall's pair the same order
-    number, and the chase treats the whole wall as one step).
+    number, and the overlay treats the whole wall as one step).
 
-    Lamps with no chase_order set (None) are excluded entirely.
+    Lamps whose `order_attr` is unset (None) are excluded entirely.
     """
     buckets: Dict[int, List[str]] = {}
     for device_id in selected_ids:
         effect = per_lamp_effects.get(device_id)
-        if effect is not None and effect.chase_order is not None:
-            buckets.setdefault(effect.chase_order, []).append(device_id)
+        if effect is None:
+            continue
+        order = getattr(effect, order_attr)
+        if order is not None:
+            buckets.setdefault(order, []).append(device_id)
     return [buckets[key] for key in sorted(buckets.keys())]
+
+
+def get_chase_groups(per_lamp_effects: Dict[str, PerLampEffect], selected_ids: Sequence[str]) -> List[List[str]]:
+    """Lamps grouped by PerLampEffect.chase_order - see get_effect_order_groups()."""
+    return get_effect_order_groups(per_lamp_effects, selected_ids, "chase_order")
+
+
+def get_group_switch_groups(per_lamp_effects: Dict[str, PerLampEffect], selected_ids: Sequence[str]) -> List[List[str]]:
+    """Lamps grouped by PerLampEffect.effect_group - see get_effect_order_groups().
+    A separate, independent grouping from get_chase_groups()'s chase_order -
+    a lamp can belong to either, both, or neither."""
+    return get_effect_order_groups(per_lamp_effects, selected_ids, "effect_group")
 
 
 def get_chase_group_dwell_weights(
@@ -357,4 +377,113 @@ class WhiteChaseAnimator:
                 temp_out = lerp(base.temp, cfg.target_temp, weight)
                 bright_out = clip(base.brightness * (1.0 + weight * cfg.intensity))
                 result[device_id] = WhiteTarget(brightness=bright_out, temp=temp_out)
+        return result
+
+
+class GroupSwitchAnimator:
+    """Alternative to ChaseAnimator's continuous rotation: lamps are grouped
+    by PerLampEffect.effect_group (see get_group_switch_groups() - a
+    separate, independent grouping from Chase's chase_order), and exactly
+    ONE group is "active" at a time, shown at full target-color strength -
+    every other group is left completely untouched. There is no width or
+    falloff shaping here: the switch from one active group to the next is
+    instant, a hard on/off step rather than Chase's gradient - so unlike
+    ChaseAnimator.apply(), this never calls circular_lerp_deg()/lerp() at
+    all, it just assigns the target hue/saturation outright on the one
+    active group.
+
+    Movement otherwise follows the exact same event-driven model as
+    ChaseAnimator.tick() (see its docstring for the full rationale): "off"
+    advances continuously at `speed_rotations_per_s`; "beat"/
+    "intensity_peak" sit still and only step `beat_multiplier` groups on an
+    actual detected hit; with no `now_s` at all (no time/audio context to
+    sync to), both fall back to the same constant speed as "off".
+
+    Deliberately no "num_rotators"-style multi-active-group support (yet) -
+    a first, simple version to try out before adding more shaping, per the
+    request that prompted this class."""
+
+    def __init__(self, config: GroupSwitchEffectConfig):
+        self.config = config
+        self.position = 0.0
+        self._beat_detector = BeatDetector(
+            sensitivity=config.beat_sensitivity,
+            min_interval_ms=config.beat_min_interval_ms,
+            min_energy=config.beat_min_energy,
+        )
+        self._peak_detector = BeatDetector(
+            sensitivity=config.peak_sensitivity,
+            min_interval_ms=config.peak_min_interval_ms,
+            min_energy=config.peak_min_energy,
+        )
+
+    def update_config(self, config: GroupSwitchEffectConfig) -> None:
+        self.config = config
+        self._beat_detector.sensitivity = config.beat_sensitivity
+        self._beat_detector.min_interval_ms = config.beat_min_interval_ms
+        self._beat_detector.min_energy = config.beat_min_energy
+        self._peak_detector.sensitivity = config.peak_sensitivity
+        self._peak_detector.min_interval_ms = config.peak_min_interval_ms
+        self._peak_detector.min_energy = config.peak_min_energy
+
+    def reset(self) -> None:
+        self.position = 0.0
+        self._beat_detector.reset()
+        self._peak_detector.reset()
+
+    def tick(
+        self,
+        dt: float,
+        num_positions: int,
+        beat_band_energy: Optional[float] = None,
+        intensity_energy: Optional[float] = None,
+        now_s: Optional[float] = None,
+    ) -> None:
+        cfg = self.config
+        n = max(1, num_positions)
+        direction = -1.0 if cfg.reverse else 1.0
+
+        if cfg.sync_mode == "beat" and now_s is not None:
+            triggered = beat_band_energy is not None and self._beat_detector.update(beat_band_energy, now_s)
+            delta = direction * cfg.beat_multiplier if triggered else 0.0
+        elif cfg.sync_mode == "intensity_peak" and now_s is not None:
+            triggered = intensity_energy is not None and self._peak_detector.update(intensity_energy, now_s)
+            delta = direction * cfg.beat_multiplier if triggered else 0.0
+        else:
+            steps_per_s = cfg.speed_rotations_per_s * n
+            delta = direction * steps_per_s * dt
+
+        self.position = (self.position + delta) % n
+
+    def apply(self, colors: Dict[str, Color], groups: List[List[str]]) -> Dict[str, Color]:
+        """Renders the current active group onto `colors`. Brightness is,
+        like Chase, always a multiplicative boost on the lamp's own current
+        value - a lamp the active mode has already driven to black stays
+        black no matter this effect's intensity."""
+        n = len(groups)
+        if n < 2:
+            return colors
+
+        cfg = self.config
+        active_index = int(math.floor(self.position)) % n
+
+        result = dict(colors)
+        for device_id in groups[active_index]:
+            base_color = result.get(device_id, Color.black())
+            h_base, s_base, v_base = base_color.to_hsv()
+
+            if cfg.color_mode == "complementary":
+                target_hue = (h_base + 180.0) % 360.0
+                target_sat = s_base
+            elif cfg.color_mode == "hue_shift":
+                # Each group shows a progressively different hue, so which
+                # color flashes on depends on which group is currently active.
+                target_hue = (cfg.custom_hue_deg + active_index * cfg.hue_shift_step_deg) % 360.0
+                target_sat = cfg.custom_saturation
+            else:  # "custom"
+                target_hue = cfg.custom_hue_deg
+                target_sat = cfg.custom_saturation
+
+            v_out = clip(v_base * (1.0 + cfg.intensity))
+            result[device_id] = Color.from_hsv(target_hue, target_sat, v_out)
         return result

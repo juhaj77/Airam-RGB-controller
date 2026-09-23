@@ -267,6 +267,36 @@ class BeatSyncModeConfig:
     dark_pulse_probability: float = 0.0  # 0..1: chance a given beat gets a pause first
     dark_pulse_duration_ms: float = 70.0  # how long the pause lasts
     dark_pulse_depth: float = 1.0  # 0..1: how dark (1.0 = fully black)
+    # Which frequency content a beat needs to be dominated by to be eligible
+    # for a dark pulse at all (see white_pulse_detect_* below) - default
+    # tuned for kick/bass-heavy hits, same idea as the main detect_low_hz/
+    # detect_high_hz above but independently adjustable.
+    dark_pulse_detect_low_hz: float = 40.0
+    dark_pulse_detect_high_hz: float = 6000.0
+
+    # "White pulses": on a random subset of beats, briefly push saturation
+    # toward one extreme, right in sync with that beat's flash - e.g. a
+    # hi-hat/cymbal accent snapping the color to near-white for an instant.
+    # `white_pulse_invert` flips which extreme: off (default) = desaturate
+    # toward white; on = saturate toward a fully vivid color instead (handy
+    # if the base `saturation` above is already fairly pastel/muted).
+    # Independent of dark pulses above - both can be enabled at once.
+    white_pulse_enabled: bool = False
+    white_pulse_invert: bool = False
+    white_pulse_probability: float = 0.3  # 0..1: chance a given beat's flash also gets this pulse
+    white_pulse_duration_ms: float = 80.0  # how long saturation holds at the extreme
+    white_pulse_depth: float = 1.0  # 0..1: how far toward the extreme (1.0 = fully white/fully saturated)
+    white_pulse_attack_ms: float = 15.0  # how fast saturation snaps toward the extreme
+    white_pulse_release_ms: float = 150.0  # how fast it settles back to the base saturation afterward
+    # Which frequency content a beat needs to be dominated by to be eligible
+    # for a white pulse - default tuned for hi-hat/cymbal-heavy hits. Dark
+    # and white pulses are mutually exclusive PER BEAT: whichever band (this
+    # one or dark_pulse_detect_* above) has more energy at that instant is
+    # the only one eligible to roll its own probability - as long as the two
+    # bands don't overlap, this keeps them from constantly landing on the
+    # exact same hit even though both roll independent dice.
+    white_pulse_detect_low_hz: float = 6100.0
+    white_pulse_detect_high_hz: float = 20000.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -291,6 +321,17 @@ class BeatSyncModeConfig:
             dark_pulse_probability=float(d.get("dark_pulse_probability", 0.0)),
             dark_pulse_duration_ms=float(d.get("dark_pulse_duration_ms", 70.0)),
             dark_pulse_depth=float(d.get("dark_pulse_depth", 1.0)),
+            dark_pulse_detect_low_hz=float(d.get("dark_pulse_detect_low_hz", 40.0)),
+            dark_pulse_detect_high_hz=float(d.get("dark_pulse_detect_high_hz", 6000.0)),
+            white_pulse_enabled=bool(d.get("white_pulse_enabled", False)),
+            white_pulse_invert=bool(d.get("white_pulse_invert", False)),
+            white_pulse_probability=float(d.get("white_pulse_probability", 0.3)),
+            white_pulse_duration_ms=float(d.get("white_pulse_duration_ms", 80.0)),
+            white_pulse_depth=float(d.get("white_pulse_depth", 1.0)),
+            white_pulse_attack_ms=float(d.get("white_pulse_attack_ms", 15.0)),
+            white_pulse_release_ms=float(d.get("white_pulse_release_ms", 150.0)),
+            white_pulse_detect_low_hz=float(d.get("white_pulse_detect_low_hz", 6100.0)),
+            white_pulse_detect_high_hz=float(d.get("white_pulse_detect_high_hz", 20000.0)),
         )
 
 
@@ -514,6 +555,13 @@ class PerLampEffect:
     # having more lamps lit at once - lower this for that position to
     # compensate. 1.0 = default/uniform (matches the original behavior).
     chase_dwell_mult: float = 1.0
+    # For the Group Switch overlay (GroupSwitchEffectConfig) - a separate,
+    # independent grouping from chase_order/chase_dwell_mult above, since a
+    # lamp can take part in the continuous Chase rotation and/or the
+    # discrete Group Switch at once, with a different grouping for each.
+    # Same "0-based, ascending, same-number lamps grouped together" rule as
+    # chase_order; None = not part of any group switch group.
+    effect_group: Optional[int] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -531,6 +579,7 @@ class PerLampEffect:
             band_index=d.get("band_index", None),
             chase_order=d.get("chase_order", None),
             chase_dwell_mult=float(d.get("chase_dwell_mult", 1.0)),
+            effect_group=d.get("effect_group", None),
         )
 
 
@@ -661,6 +710,94 @@ class ChaseEffectConfig:
             hue_shift_step_deg=float(d.get("hue_shift_step_deg", 45.0)),
             custom_hue_deg=float(d.get("custom_hue_deg", 280.0)),
             custom_saturation=float(d.get("custom_saturation", 1.0)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Group Switch - an alternative to the Chase overlay's continuous rotation
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GroupSwitchEffectConfig:
+    """Alternative to the Chase overlay's continuous rotation: lamps are
+    grouped by PerLampEffect.effect_group (own, separate grouping from
+    Chase's chase_order - a lamp can be part of either, both, or neither),
+    and exactly ONE group is "active" at a time, shown at full target-color
+    strength - every other group is left completely untouched. Unlike
+    Chase, there is no width/falloff shaping: switching from one active
+    group to the next is instant, a hard on/off step rather than a
+    gradient. (Deliberately simple for now - a first version to try out
+    before adding any more shaping/complexity.)
+
+    Movement uses the exact same three-way model as ChaseEffectConfig:
+    `sync_mode` "off" advances continuously at `speed_rotations_per_s`
+    (full loops through all groups per second); "beat"/"intensity_peak"
+    instead sit still and only advance `beat_multiplier` groups the instant
+    a beat/broadband loudness peak is detected by this effect's own,
+    independent detector.
+    """
+
+    enabled: bool = False
+
+    speed_rotations_per_s: float = 0.3  # constant speed when sync_mode == "off": full loops/second
+    reverse: bool = False  # flips which way the active group advances through the group order
+    sync_mode: str = "off"  # "off" (constant speed) | "beat" | "intensity_peak"
+    beat_multiplier: float = 1.0  # groups advanced per detected beat/peak, when synced
+
+    # Own independent beat detector, used when sync_mode == "beat".
+    beat_detect_low_hz: float = 40.0
+    beat_detect_high_hz: float = 200.0
+    beat_sensitivity: float = 1.6
+    beat_min_interval_ms: float = 120.0
+    beat_min_energy: float = 0.12
+
+    # Own independent, deliberately wide-band detector, used when
+    # sync_mode == "intensity_peak" - same idea as Chase's.
+    peak_detect_low_hz: float = 20.0
+    peak_detect_high_hz: float = 16000.0
+    peak_sensitivity: float = 1.3
+    peak_min_interval_ms: float = 60.0
+    peak_min_energy: float = 0.08
+
+    intensity: float = 3.0  # brightness boost multiplier on the active group (base 0 always stays 0)
+
+    color_mode: str = "custom"  # "custom" | "complementary" | "hue_shift"
+    custom_hue_deg: float = 280.0
+    custom_saturation: float = 1.0
+    # Used when color_mode == "hue_shift": each successive group shows a hue
+    # offset by this many degrees from the previous one (starting from
+    # custom_hue_deg) - same slider/meaning as Chase's hue_shift_step_deg.
+    hue_shift_step_deg: float = 45.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "GroupSwitchEffectConfig":
+        sync_mode = d.get("sync_mode")
+        if sync_mode not in ("off", "beat", "intensity_peak"):
+            sync_mode = "off"
+        return cls(
+            enabled=bool(d.get("enabled", False)),
+            speed_rotations_per_s=float(d.get("speed_rotations_per_s", 0.3)),
+            reverse=bool(d.get("reverse", False)),
+            sync_mode=sync_mode,
+            beat_multiplier=float(d.get("beat_multiplier", 1.0)),
+            beat_detect_low_hz=float(d.get("beat_detect_low_hz", 40.0)),
+            beat_detect_high_hz=float(d.get("beat_detect_high_hz", 200.0)),
+            beat_sensitivity=float(d.get("beat_sensitivity", 1.6)),
+            beat_min_interval_ms=float(d.get("beat_min_interval_ms", 120.0)),
+            beat_min_energy=float(d.get("beat_min_energy", 0.12)),
+            peak_detect_low_hz=float(d.get("peak_detect_low_hz", 20.0)),
+            peak_detect_high_hz=float(d.get("peak_detect_high_hz", 16000.0)),
+            peak_sensitivity=float(d.get("peak_sensitivity", 1.3)),
+            peak_min_interval_ms=float(d.get("peak_min_interval_ms", 60.0)),
+            peak_min_energy=float(d.get("peak_min_energy", 0.08)),
+            intensity=float(d.get("intensity", 3.0)),
+            color_mode=d.get("color_mode", "custom"),
+            custom_hue_deg=float(d.get("custom_hue_deg", 280.0)),
+            custom_saturation=float(d.get("custom_saturation", 1.0)),
+            hue_shift_step_deg=float(d.get("hue_shift_step_deg", 45.0)),
         )
 
 
@@ -809,17 +946,35 @@ class AudioConfig:
     fft_size: int = 2048
     analysis_update_hz: float = 60.0  # how often we pull a new FFT frame
 
+    # Audio source: "loopback" (default - WASAPI "what you hear", i.e. system
+    # playback) or "microphone" (a real recording device) - lets you test how
+    # the lights react to actual room/ambient sound instead of only to
+    # whatever's playing through Windows.
+    source: str = "loopback"  # "loopback" | "microphone"
+    mic_device_index: Optional[int] = None  # separate index namespace from device_index above
+    # Microphones are typically much quieter than a loopback tap - this
+    # multiplies captured samples before analysis/level metering (loopback
+    # is unaffected). 1.0 = unchanged; raise it if a quiet mic barely
+    # triggers anything, lower it if it's clipping/oversensitive.
+    mic_gain: float = 1.0
+
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "AudioConfig":
+        source = d.get("source", "loopback")
+        if source not in ("loopback", "microphone"):
+            source = "loopback"
         return cls(
             device_index=d.get("device_index", None),
             samplerate=int(d.get("samplerate", 48000)),
             block_size=int(d.get("block_size", 1024)),
             fft_size=int(d.get("fft_size", 2048)),
             analysis_update_hz=float(d.get("analysis_update_hz", 60.0)),
+            source=source,
+            mic_device_index=d.get("mic_device_index", None),
+            mic_gain=float(d.get("mic_gain", 1.0)),
         )
 
 
@@ -862,6 +1017,7 @@ class AppConfig:
     color_mapping: ColorMappingConfig = field(default_factory=ColorMappingConfig)
     per_lamp_effects: Dict[str, PerLampEffect] = field(default_factory=dict)
     chase: "ChaseEffectConfig" = field(default_factory=lambda: ChaseEffectConfig())
+    group_switch: "GroupSwitchEffectConfig" = field(default_factory=lambda: GroupSwitchEffectConfig())
     white_chase: "WhiteChaseEffectConfig" = field(default_factory=lambda: WhiteChaseEffectConfig())
     ambient_scene: "AmbientSceneConfig" = field(default_factory=lambda: AmbientSceneConfig())
     manual_state: "ManualStateConfig" = field(default_factory=lambda: ManualStateConfig())
@@ -878,6 +1034,7 @@ class AppConfig:
             "color_mapping": self.color_mapping.to_dict(),
             "per_lamp_effects": {k: v.to_dict() for k, v in self.per_lamp_effects.items()},
             "chase": self.chase.to_dict(),
+            "group_switch": self.group_switch.to_dict(),
             "white_chase": self.white_chase.to_dict(),
             "ambient_scene": self.ambient_scene.to_dict(),
             "manual_state": self.manual_state.to_dict(),
@@ -898,6 +1055,7 @@ class AppConfig:
                 k: PerLampEffect.from_dict(v) for k, v in d.get("per_lamp_effects", {}).items()
             },
             chase=ChaseEffectConfig.from_dict(d.get("chase", {})),
+            group_switch=GroupSwitchEffectConfig.from_dict(d.get("group_switch", {})),
             white_chase=WhiteChaseEffectConfig.from_dict(d.get("white_chase", {})),
             ambient_scene=AmbientSceneConfig.from_dict(d.get("ambient_scene", {})),
             manual_state=ManualStateConfig.from_dict(d.get("manual_state", {})),

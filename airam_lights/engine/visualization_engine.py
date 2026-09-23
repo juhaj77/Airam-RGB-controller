@@ -39,7 +39,13 @@ from ..config.schema import AppConfig
 from ..diagnostics.metrics import RateCounter
 from ..dsp.bands import band_energies, band_energy, spectral_centroid_hz, spectral_contrast
 from ..dsp.beat_detector import BeatDetector
-from ..effects.chase import ChaseAnimator, get_chase_group_dwell_weights, get_chase_groups
+from ..effects.chase import (
+    ChaseAnimator,
+    GroupSwitchAnimator,
+    get_chase_group_dwell_weights,
+    get_chase_groups,
+    get_group_switch_groups,
+)
 from ..dsp.fft_engine import FFTEngine, SpectrumFrame
 from ..dsp.smoothing import AttackReleaseSmoother, HueSmoother, MultiSmoother
 from ..lamps.manager import LampManager
@@ -112,7 +118,11 @@ class VisualizationEngine:
         self._beat_hue_cursor = self._beat_target_hue
         self._hue_smoother_beat = HueSmoother(bs.hue_attack_ms, initial=self._beat_target_hue)
         self._smoother_beat_value = AttackReleaseSmoother(bs.brightness_attack_ms, bs.brightness_release_ms)
+        self._smoother_beat_saturation = AttackReleaseSmoother(
+            bs.white_pulse_attack_ms, bs.white_pulse_release_ms, initial=bs.saturation
+        )
         self._beat_dark_until: Optional[float] = None  # set while a dark-pulse pause is pending/active
+        self._beat_white_pulse_until: Optional[float] = None  # set while a white-pulse hold is pending/active
         self.last_beat_time: Optional[float] = None
 
         pf = config.color_mapping.peak_flash
@@ -139,6 +149,7 @@ class VisualizationEngine:
         self.last_beat_time_white: Optional[float] = None
 
         self._chase_animator = ChaseAnimator(config.chase)
+        self._group_switch_animator = GroupSwitchAnimator(config.group_switch)
 
         self.running = False
         self._raw_lock = threading.Lock()
@@ -188,6 +199,8 @@ class VisualizationEngine:
         self._hue_smoother_beat.time_constant_ms = bs.hue_attack_ms
         self._smoother_beat_value.attack_ms = bs.brightness_attack_ms
         self._smoother_beat_value.release_ms = bs.brightness_release_ms
+        self._smoother_beat_saturation.attack_ms = bs.white_pulse_attack_ms
+        self._smoother_beat_saturation.release_ms = bs.white_pulse_release_ms
 
         pf = self.config.color_mapping.peak_flash
         self._peak_detector.sensitivity = pf.sensitivity
@@ -210,6 +223,7 @@ class VisualizationEngine:
         self._smoother_beat_white_value.release_ms = bsw.brightness_release_ms
 
         self._chase_animator.update_config(self.config.chase)
+        self._group_switch_animator.update_config(self.config.group_switch)
 
         self.lamp_manager.set_network_config(self.config.network, sm.min_change_threshold)
 
@@ -289,6 +303,9 @@ class VisualizationEngine:
 
         if colors and self.config.chase.enabled:
             colors = self._apply_chase_overlay(colors, frame, dt, wall_now, selected_ids)
+
+        if colors and self.config.group_switch.enabled:
+            colors = self._apply_group_switch_overlay(colors, frame, dt, wall_now, selected_ids)
 
         self.latest_lamp_colors = colors
         self.latest_lamp_white_targets = {}
@@ -397,7 +414,21 @@ class VisualizationEngine:
         (a rhythm-synced pause toward black) before the flash actually
         happens - a real-time system can only react to a beat as it occurs,
         not anticipate one, so the pause always starts right on the trigger
-        and the color flash is simply delayed until the pause ends."""
+        and the color flash is simply delayed until the pause ends.
+
+        Independently, a random subset of the actual flashes (see
+        white_pulse_* config) also briefly push saturation toward one
+        extreme right as they happen - a hi-hat/cymbal-style accent that
+        snaps to near-white (or, inverted, to fully vivid) for an instant.
+
+        Dark and white pulses are mutually exclusive PER BEAT: whichever of
+        their two (independently configurable) frequency bands has more
+        energy right at that beat is the only one eligible to roll its own
+        probability - otherwise, since both would roll independent dice on
+        every single beat, they'd land on the same hit constantly. As long
+        as the two bands don't overlap (e.g. dark tuned to the kick's range,
+        white to the hi-hat's), this keeps them visually distinct accents
+        instead of frequently piling up on top of each other."""
         cfg = self.config.color_mapping.beat_sync
 
         raw_energy = band_energy(frame, cfg.detect_low_hz, cfg.detect_high_hz)
@@ -405,25 +436,43 @@ class VisualizationEngine:
 
         flash_now = False
         if is_beat:
-            if (
-                cfg.dark_pulse_probability > 0.0
+            dark_band_energy = band_energy(frame, cfg.dark_pulse_detect_low_hz, cfg.dark_pulse_detect_high_hz)
+            white_band_energy = band_energy(frame, cfg.white_pulse_detect_low_hz, cfg.white_pulse_detect_high_hz)
+            dark_is_dominant = dark_band_energy >= white_band_energy
+
+            triggered_dark_pulse = (
+                dark_is_dominant
+                and cfg.dark_pulse_probability > 0.0
                 and cfg.dark_pulse_duration_ms > 0.0
                 and random.random() < cfg.dark_pulse_probability
-            ):
+            )
+            if triggered_dark_pulse:
                 self._beat_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0
             else:
                 self._beat_dark_until = None
                 flash_now = True
+                if (
+                    not dark_is_dominant
+                    and cfg.white_pulse_enabled
+                    and cfg.white_pulse_probability > 0.0
+                    and cfg.white_pulse_duration_ms > 0.0
+                    and random.random() < cfg.white_pulse_probability
+                ):
+                    self._beat_white_pulse_until = wall_now + cfg.white_pulse_duration_ms / 1000.0
 
         if self._beat_dark_until is not None and wall_now >= self._beat_dark_until:
             self._beat_dark_until = None
             flash_now = True
+
+        if self._beat_white_pulse_until is not None and wall_now >= self._beat_white_pulse_until:
+            self._beat_white_pulse_until = None
 
         if flash_now:
             self._beat_target_hue = self._pick_next_beat_hue(cfg, frame)
             self.last_beat_time = wall_now
 
         in_dark_pulse = self._beat_dark_until is not None
+        in_white_pulse = self._beat_white_pulse_until is not None
         hue_s = self._hue_smoother_beat.update(self._beat_target_hue, dt)
 
         if in_dark_pulse:
@@ -434,14 +483,25 @@ class VisualizationEngine:
             target_value = cfg.sustain_brightness
         value_s = self._smoother_beat_value.update(target_value, dt)
 
+        if in_white_pulse:
+            # depth=1.0 reaches the extreme exactly; depth=0.0 is a no-op -
+            # lerp() from the base saturation toward whichever extreme.
+            extreme = 1.0 if cfg.white_pulse_invert else 0.0
+            target_saturation = lerp(cfg.saturation, extreme, cfg.white_pulse_depth)
+        else:
+            target_saturation = cfg.saturation
+        saturation_s = self._smoother_beat_saturation.update(target_saturation, dt)
+
         self.latest_band3_levels = {
             "beat_energy": raw_energy,
             "hue": hue_s,
             "value": value_s,
+            "saturation": saturation_s,
             "beat": 1.0 if is_beat else 0.0,
             "dark_pulse": 1.0 if in_dark_pulse else 0.0,
+            "white_pulse": 1.0 if in_white_pulse else 0.0,
         }
-        self._history_beat.push(wall_now, np.array([hue_s, value_s]))
+        self._history_beat.push(wall_now, np.array([hue_s, value_s, saturation_s]))
 
         colors: Dict[str, Color] = {}
         for device_id in selected_ids:
@@ -449,9 +509,9 @@ class VisualizationEngine:
             sample_t = wall_now - ((effect.phase_offset_ms / 1000.0) if effect else 0.0)
             vals = self._history_beat.sample_at(sample_t)
             if vals is None:
-                vals = np.array([hue_s, value_s])
+                vals = np.array([hue_s, value_s, saturation_s])
             mult = effect.sensitivity_mult if effect else 1.0
-            color = self.color_engine.compute_beat_sync(vals[0], cfg.saturation, clip(vals[1] * mult))
+            color = self.color_engine.compute_beat_sync(vals[0], vals[2], clip(vals[1] * mult))
             if effect is not None:
                 color = apply_per_lamp_effect(color, effect)
             colors[device_id] = color
@@ -665,3 +725,36 @@ class VisualizationEngine:
             dwell_weights=dwell_weights,
         )
         return self._chase_animator.apply(colors, groups)
+
+    # -- Group Switch overlay: discrete alternative to Chase, layered the same way ---------
+    #
+    # The actual position/color math lives in effects/chase.py
+    # (GroupSwitchAnimator + get_group_switch_groups) - this method just
+    # wires it up to this engine's audio data, mirroring
+    # _apply_chase_overlay() above exactly (same sync_mode options, own
+    # independent detector) except there's no dwell-weight concept here -
+    # Group Switch has no continuous falloff for a dwell multiplier to shape.
+
+    def _apply_group_switch_overlay(
+        self, colors: Dict[str, Color], frame: SpectrumFrame, dt: float, wall_now: float, selected_ids
+    ) -> Dict[str, Color]:
+        cfg = self.config.group_switch
+        groups = get_group_switch_groups(self.config.per_lamp_effects, selected_ids)
+        if len(groups) < 2:
+            return colors  # need at least 2 groups for switching to mean anything
+
+        beat_energy = None
+        intensity_energy = None
+        if cfg.sync_mode == "beat":
+            beat_energy = band_energy(frame, cfg.beat_detect_low_hz, cfg.beat_detect_high_hz)
+        elif cfg.sync_mode == "intensity_peak":
+            intensity_energy = band_energy(frame, cfg.peak_detect_low_hz, cfg.peak_detect_high_hz)
+
+        self._group_switch_animator.tick(
+            dt,
+            num_positions=len(groups),
+            beat_band_energy=beat_energy,
+            intensity_energy=intensity_energy,
+            now_s=wall_now,
+        )
+        return self._group_switch_animator.apply(colors, groups)

@@ -2,17 +2,23 @@
 the music visualizer and the standalone manual control app, so this is
 tested independently of both."""
 from airam_lights.color.models import Color, WhiteTarget
-from airam_lights.config.schema import ChaseEffectConfig, PerLampEffect, WhiteChaseEffectConfig
+from airam_lights.config.schema import ChaseEffectConfig, GroupSwitchEffectConfig, PerLampEffect, WhiteChaseEffectConfig
 from airam_lights.effects.chase import (
     ChaseAnimator,
+    GroupSwitchAnimator,
     WhiteChaseAnimator,
     get_chase_group_dwell_weights,
     get_chase_groups,
+    get_group_switch_groups,
 )
 
 
 def _effects(order_by_id: dict) -> dict:
     return {device_id: PerLampEffect(device_id=device_id, chase_order=order) for device_id, order in order_by_id.items()}
+
+
+def _group_switch_effects(group_by_id: dict) -> dict:
+    return {device_id: PerLampEffect(device_id=device_id, effect_group=group) for device_id, group in group_by_id.items()}
 
 
 def test_get_chase_groups_orders_ascending_and_excludes_unset():
@@ -401,3 +407,154 @@ def test_chase_sync_mode_backward_compatible_with_old_boolean_field():
     assert ChaseEffectConfig.from_dict({"sync_to_beat": True}).sync_mode == "beat"
     assert ChaseEffectConfig.from_dict({"sync_to_beat": False}).sync_mode == "off"
     assert ChaseEffectConfig.from_dict({"sync_mode": "intensity_peak"}).sync_mode == "intensity_peak"
+
+
+# -- Group Switch: discrete alternative to Chase's continuous rotation ----------------------
+
+
+def test_get_group_switch_groups_orders_ascending_and_excludes_unset():
+    effects = _group_switch_effects({"a": 2, "b": 0, "c": None, "d": 1})
+    groups = get_group_switch_groups(effects, ["a", "b", "c", "d"])
+    assert groups == [["b"], ["d"], ["a"]]
+
+
+def test_group_switch_groups_independent_from_chase_order():
+    """A lamp's chase_order and effect_group are separate knobs - setting
+    one must never leak into the other's grouping."""
+    effects = {
+        "a": PerLampEffect(device_id="a", chase_order=0, effect_group=None),
+        "b": PerLampEffect(device_id="b", chase_order=None, effect_group=0),
+        "c": PerLampEffect(device_id="c", chase_order=1, effect_group=1),
+    }
+    chase_groups = get_chase_groups(effects, ["a", "b", "c"])
+    switch_groups = get_group_switch_groups(effects, ["a", "b", "c"])
+    assert chase_groups == [["a"], ["c"]]  # "b" excluded - no chase_order
+    assert switch_groups == [["b"], ["c"]]  # "a" excluded - no effect_group
+
+
+def test_group_switch_applies_full_color_with_no_blend_on_other_groups():
+    """The defining difference from Chase: the active group gets the exact
+    target color (no interpolation toward it), and every other group is
+    left completely untouched - a hard step, not a gradient."""
+    cfg = GroupSwitchEffectConfig(enabled=True, color_mode="custom", custom_hue_deg=200.0, custom_saturation=0.9, intensity=0.0)
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"]]
+    base_colors = {"a": Color(0.1, 0.1, 0.1), "b": Color(0.1, 0.1, 0.1), "c": Color(0.1, 0.1, 0.1)}
+
+    animator.position = 0.0  # active group = index 0 ("a")
+    out = animator.apply(dict(base_colors), groups)
+
+    h_a, s_a, _ = out["a"].to_hsv()
+    assert abs(h_a - 200.0) < 1e-6  # exact target hue, not partially blended
+    assert abs(s_a - 0.9) < 1e-6
+    assert out["b"] == base_colors["b"]  # untouched, no partial bleed
+    assert out["c"] == base_colors["c"]
+
+
+def test_group_switch_hue_shift_mode_varies_hue_by_active_group():
+    cfg = GroupSwitchEffectConfig(enabled=True, color_mode="hue_shift", custom_hue_deg=0.0, hue_shift_step_deg=90.0, intensity=0.0)
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"], ["d"]]
+    base_colors = {g[0]: Color(0.5, 0.5, 0.5) for g in groups}
+
+    expected_hues = [0.0, 90.0, 180.0, 270.0]
+    for i, expected_hue in enumerate(expected_hues):
+        animator.position = float(i)
+        out = animator.apply(dict(base_colors), groups)
+        h = out[groups[i][0]].to_hsv()[0]
+        assert abs(((h - expected_hue + 180.0) % 360.0) - 180.0) < 1e-6
+
+
+def test_group_switch_too_few_groups_returns_colors_unchanged():
+    animator = GroupSwitchAnimator(GroupSwitchEffectConfig(enabled=True))
+    colors = {"a": Color(0.5, 0.5, 0.5)}
+    out = animator.apply(colors, [["a"]])
+    assert out is colors
+
+
+def test_group_switch_off_mode_advances_continuously():
+    animator = GroupSwitchAnimator(GroupSwitchEffectConfig(sync_mode="off", speed_rotations_per_s=1.0))
+    animator.tick(dt=0.5, num_positions=4)  # half a "lap" through 4 groups = 2 groups advanced
+    assert abs(animator.position - 2.0) < 1e-9
+
+
+def test_group_switch_reverse_flips_direction():
+    forward = GroupSwitchAnimator(GroupSwitchEffectConfig(sync_mode="off", speed_rotations_per_s=1.0, reverse=False))
+    backward = GroupSwitchAnimator(GroupSwitchEffectConfig(sync_mode="off", speed_rotations_per_s=1.0, reverse=True))
+    forward.tick(dt=0.1, num_positions=8)
+    backward.tick(dt=0.1, num_positions=8)
+    assert forward.position > 0.0
+    assert abs(backward.position - (8.0 - forward.position)) < 1e-9
+
+
+def test_group_switch_beat_mode_never_drifts_between_hits_and_steps_on_each_one():
+    cfg = GroupSwitchEffectConfig(sync_mode="beat", beat_multiplier=1.0, speed_rotations_per_s=5.0)
+    animator = GroupSwitchAnimator(cfg)
+    dt = 1.0 / 30.0
+    t = 0.0
+
+    for _ in range(6):  # quiet priming, below min_energy (0.12 default) - must never trigger
+        animator.tick(dt, num_positions=8, beat_band_energy=0.05, now_s=t)
+        t += dt
+    assert animator.position == 0.0
+
+    animator.tick(dt, num_positions=8, beat_band_energy=0.9, now_s=t)  # one genuine beat
+    t += dt
+    assert animator.position == 1.0
+
+    for _ in range(10):  # back to quiet - must hold, not keep advancing
+        animator.tick(dt, num_positions=8, beat_band_energy=0.05, now_s=t)
+        t += dt
+    assert animator.position == 1.0
+
+
+def test_group_switch_intensity_peak_mode_steps_on_detected_peak_only():
+    cfg = GroupSwitchEffectConfig(sync_mode="intensity_peak", beat_multiplier=2.0, speed_rotations_per_s=5.0)
+    animator = GroupSwitchAnimator(cfg)
+    dt = 1.0 / 30.0
+    t = 0.0
+
+    for _ in range(6):  # below peak_min_energy (0.08 default) - must never trigger
+        animator.tick(dt, num_positions=8, intensity_energy=0.03, now_s=t)
+        t += dt
+    assert animator.position == 0.0
+
+    animator.tick(dt, num_positions=8, intensity_energy=0.9, now_s=t)  # one genuine peak
+    t += dt
+    assert animator.position == 2.0
+
+    for _ in range(10):
+        animator.tick(dt, num_positions=8, intensity_energy=0.03, now_s=t)
+        t += dt
+    assert animator.position == 2.0
+
+
+def test_group_switch_falls_back_to_constant_speed_when_no_time_context_given():
+    off_animator = GroupSwitchAnimator(GroupSwitchEffectConfig(sync_mode="off", speed_rotations_per_s=1.0))
+    beat_animator = GroupSwitchAnimator(GroupSwitchEffectConfig(sync_mode="beat", speed_rotations_per_s=1.0))
+    peak_animator = GroupSwitchAnimator(GroupSwitchEffectConfig(sync_mode="intensity_peak", speed_rotations_per_s=1.0))
+
+    off_animator.tick(dt=0.2, num_positions=8)
+    beat_animator.tick(dt=0.2, num_positions=8)  # no now_s/beat_band_energy at all
+    peak_animator.tick(dt=0.2, num_positions=8)
+
+    assert off_animator.position > 0.0
+    assert beat_animator.position == off_animator.position
+    assert peak_animator.position == off_animator.position
+
+
+def test_group_switch_config_defaults_and_backward_compatible():
+    cfg = GroupSwitchEffectConfig()
+    assert cfg.enabled is False
+    assert cfg.sync_mode == "off"
+    restored = GroupSwitchEffectConfig.from_dict({})
+    assert restored == cfg
+    assert GroupSwitchEffectConfig.from_dict({"sync_mode": "intensity_peak"}).sync_mode == "intensity_peak"
+    assert GroupSwitchEffectConfig.from_dict({"sync_mode": "bogus"}).sync_mode == "off"
+
+
+def test_per_lamp_effect_group_defaults_to_none_and_is_backward_compatible():
+    effect = PerLampEffect(device_id="a")
+    assert effect.effect_group is None
+    restored = PerLampEffect.from_dict({"device_id": "a"})  # no effect_group key at all (old config)
+    assert restored.effect_group is None

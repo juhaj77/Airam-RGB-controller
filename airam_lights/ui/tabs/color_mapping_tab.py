@@ -124,22 +124,43 @@ class ColorMappingTab(QWidget):
         self.beat_low_spin.setRange(20, 20000)
         self.beat_low_spin.setSuffix(" Hz")
         self.beat_low_spin.setValue(int(bs.detect_low_hz))
+        self.beat_low_spin.setToolTip(
+            "Which frequencies count as a 'beat' at all - every hue/brightness snap below, and both "
+            "pulse types further down, only ever happen when a hit is detected somewhere in this range."
+        )
         detect_row.addWidget(self.beat_low_spin)
         detect_row.addWidget(QLabel("-"))
         self.beat_high_spin = QSpinBox()
         self.beat_high_spin.setRange(20, 20000)
         self.beat_high_spin.setSuffix(" Hz")
         self.beat_high_spin.setValue(int(bs.detect_high_hz))
+        self.beat_high_spin.setToolTip(self.beat_low_spin.toolTip())
         detect_row.addWidget(self.beat_high_spin)
         detect_row.addStretch(1)
         beat_layout.addLayout(detect_row)
-        beat_band_note = QLabel("Default 40-200 Hz targets kick drums; widen it to react to more of the mix.")
+        beat_band_note = QLabel(
+            "Default 40-200 Hz targets kick drums; widen it (e.g. to also cover hi-hats/cymbals) if "
+            "you want the white pulse below to have hits of its own to react to - see its note further "
+            "down."
+        )
         beat_band_note.setWordWrap(True)
         beat_layout.addWidget(beat_band_note)
 
-        self.beat_sensitivity_slider = FloatSlider("Sensitivity", 1.05, 4.0, bs.sensitivity, decimals=2)
-        self.beat_min_interval_slider = FloatSlider("Min interval", 30.0, 1000.0, bs.min_interval_ms, decimals=0, suffix=" ms")
-        self.beat_min_energy_slider = FloatSlider("Min energy floor", 0.0, 1.0, bs.min_energy)
+        self.beat_sensitivity_slider = FloatSlider(
+            "Sensitivity", 1.05, 4.0, bs.sensitivity, decimals=2,
+            tooltip="Higher = only very sharp, obvious hits register as a beat at all, so every hue/"
+            "brightness snap and both pulse types below fire less often but more confidently.",
+        )
+        self.beat_min_interval_slider = FloatSlider(
+            "Min interval", 30.0, 1000.0, bs.min_interval_ms, decimals=0, suffix=" ms",
+            tooltip="Minimum time between two triggered beats - stops one sustained hit from "
+            "re-triggering the hue/brightness snap (and pulses) many times in quick succession.",
+        )
+        self.beat_min_energy_slider = FloatSlider(
+            "Min energy floor", 0.0, 1.0, bs.min_energy,
+            tooltip="Absolute loudness floor below which nothing can trigger, even if it's a relative "
+            "spike - keeps quiet passages from firing hue/brightness snaps or pulses on near-silence.",
+        )
         for w in (self.beat_sensitivity_slider, self.beat_min_interval_slider, self.beat_min_energy_slider):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
@@ -152,6 +173,10 @@ class ColorMappingTab(QWidget):
         self.beat_hue_mode_combo = QComboBox()
         self.beat_hue_mode_combo.addItems(["random", "step", "spectrum"])
         self.beat_hue_mode_combo.setCurrentText(bs.hue_mode)
+        self.beat_hue_mode_combo.setToolTip(
+            "Which hue (color, i.e. the RGB mix) each beat jumps to - see the note below for what each "
+            "option does. Saturation and brightness are controlled separately by the sliders further down."
+        )
         self.beat_hue_mode_combo.currentTextChanged.connect(self._on_beat_changed)
         hue_row.addWidget(self.beat_hue_mode_combo)
         hue_row.addStretch(1)
@@ -164,14 +189,47 @@ class ColorMappingTab(QWidget):
         beat_hue_mode_note.setWordWrap(True)
         beat_layout.addWidget(beat_hue_mode_note)
 
-        self.beat_hue_step_slider = FloatSlider("Hue step (for 'step')", 1.0, 180.0, bs.hue_step_deg, decimals=1, suffix=" deg")
-        self.beat_min_jump_slider = FloatSlider("Min hue jump (for 'random')", 0.0, 180.0, bs.min_hue_jump_deg, decimals=0, suffix=" deg")
-        self.beat_saturation_slider = FloatSlider("Saturation", 0.0, 1.0, bs.saturation)
-        self.beat_flash_slider = FloatSlider("Flash brightness", 0.0, 1.0, bs.flash_brightness)
-        self.beat_sustain_slider = FloatSlider("Sustain brightness", 0.0, 1.0, bs.sustain_brightness)
-        self.beat_hue_attack_slider = FloatSlider("Hue snap speed", 5.0, 500.0, bs.hue_attack_ms, decimals=0, suffix=" ms")
-        self.beat_bright_attack_slider = FloatSlider("Brightness attack", 1.0, 200.0, bs.brightness_attack_ms, decimals=0, suffix=" ms")
-        self.beat_bright_release_slider = FloatSlider("Brightness decay", 50.0, 2000.0, bs.brightness_release_ms, decimals=0, suffix=" ms")
+        self.beat_hue_step_slider = FloatSlider(
+            "Hue step (for 'step')", 1.0, 180.0, bs.hue_step_deg, decimals=1, suffix=" deg",
+            tooltip="How far around the color wheel the hue jumps on each beat, in 'step' mode - "
+            "bigger steps mean more visually different colors from one hit to the next.",
+        )
+        self.beat_min_jump_slider = FloatSlider(
+            "Min hue jump (for 'random')", 0.0, 180.0, bs.min_hue_jump_deg, decimals=0, suffix=" deg",
+            tooltip="In 'random' mode, how different the new hue must be from the last one - prevents "
+            "two consecutive beats from landing on nearly the same color purely by chance.",
+        )
+        self.beat_saturation_slider = FloatSlider(
+            "Saturation", 0.0, 1.0, bs.saturation,
+            tooltip="The base color vividness on every beat (1.0 = fully saturated, lower = more "
+            "pastel/washed out) - this is the saturation both the dark and white pulses below "
+            "temporarily push away from, then ease back to.",
+        )
+        self.beat_flash_slider = FloatSlider(
+            "Flash brightness", 0.0, 1.0, bs.flash_brightness,
+            tooltip="How bright the color is exactly on the beat, before it starts decaying - this is "
+            "the flash you actually see land on the hit itself.",
+        )
+        self.beat_sustain_slider = FloatSlider(
+            "Sustain brightness", 0.0, 1.0, bs.sustain_brightness,
+            tooltip="How bright it settles to between beats, once the flash has decayed - the resting/"
+            "idle brightness the lamp sits at until the next hit.",
+        )
+        self.beat_hue_attack_slider = FloatSlider(
+            "Hue snap speed", 5.0, 500.0, bs.hue_attack_ms, decimals=0, suffix=" ms",
+            tooltip="How fast the color transitions to the new hue after a beat - low = an almost "
+            "instant snap, high = a visible fade from the old color into the new one.",
+        )
+        self.beat_bright_attack_slider = FloatSlider(
+            "Brightness attack", 1.0, 200.0, bs.brightness_attack_ms, decimals=0, suffix=" ms",
+            tooltip="How fast brightness jumps up to Flash brightness on a beat - low = a sharp, "
+            "percussive flash; high = brightness eases up instead of snapping.",
+        )
+        self.beat_bright_release_slider = FloatSlider(
+            "Brightness decay", 50.0, 2000.0, bs.brightness_release_ms, decimals=0, suffix=" ms",
+            tooltip="How slowly brightness fades from the flash back down to Sustain brightness - "
+            "higher means a longer glow tail lingering after each hit.",
+        )
         for w in (
             self.beat_hue_step_slider,
             self.beat_min_jump_slider,
@@ -186,22 +244,152 @@ class ColorMappingTab(QWidget):
             beat_layout.addWidget(w)
 
         beat_dark_note = QLabel(
-            "Dark pulses: on a random subset of beats, briefly dip toward black BEFORE flashing - "
-            "a rhythm-synced pause/strobe accent, on top of the hue and brightness above."
+            "Dark pulses: on a random subset of beats, briefly dip brightness toward black BEFORE "
+            "flashing - a rhythm-synced pause/strobe accent. Eligible only on beats dominated by the "
+            "frequency band below (kick/bass by default) - see the white pulse note further down for "
+            "why, and both pulse types' notes together."
         )
         beat_dark_note.setWordWrap(True)
         beat_layout.addWidget(beat_dark_note)
-        self.beat_dark_prob_slider = FloatSlider("Dark pulse probability", 0.0, 1.0, bs.dark_pulse_probability, decimals=2)
-        self.beat_dark_duration_slider = FloatSlider(
-            "Dark pulse duration", 10.0, 500.0, bs.dark_pulse_duration_ms, decimals=0, suffix=" ms"
+
+        dark_detect_row = QHBoxLayout()
+        dark_detect_row.addWidget(QLabel("Dark pulse detection band:"))
+        self.beat_dark_low_spin = QSpinBox()
+        self.beat_dark_low_spin.setRange(20, 20000)
+        self.beat_dark_low_spin.setSuffix(" Hz")
+        self.beat_dark_low_spin.setValue(int(bs.dark_pulse_detect_low_hz))
+        self.beat_dark_low_spin.setToolTip(
+            "Which frequency content a beat needs to be dominated by to be ELIGIBLE for a dark pulse "
+            "at all - tuned for kick/bass hits by default. At every beat, whichever of this band and "
+            "the white pulse band below is louder is the only one allowed to roll its own probability, "
+            "so kick-heavy hits and hi-hat-heavy hits don't constantly compete for the same accent."
         )
-        self.beat_dark_depth_slider = FloatSlider("Dark pulse depth", 0.0, 1.0, bs.dark_pulse_depth, decimals=2)
+        dark_detect_row.addWidget(self.beat_dark_low_spin)
+        dark_detect_row.addWidget(QLabel("-"))
+        self.beat_dark_high_spin = QSpinBox()
+        self.beat_dark_high_spin.setRange(20, 20000)
+        self.beat_dark_high_spin.setSuffix(" Hz")
+        self.beat_dark_high_spin.setValue(int(bs.dark_pulse_detect_high_hz))
+        self.beat_dark_high_spin.setToolTip(self.beat_dark_low_spin.toolTip())
+        dark_detect_row.addWidget(self.beat_dark_high_spin)
+        dark_detect_row.addStretch(1)
+        beat_layout.addLayout(dark_detect_row)
+
+        self.beat_dark_prob_slider = FloatSlider(
+            "Dark pulse probability", 0.0, 1.0, bs.dark_pulse_probability, decimals=2,
+            tooltip="Chance that a given beat DOMINATED BY THE BAND ABOVE gets this dark dip instead "
+            "of flashing immediately - 0 = never, 1 = every eligible beat.",
+        )
+        self.beat_dark_duration_slider = FloatSlider(
+            "Dark pulse duration", 10.0, 500.0, bs.dark_pulse_duration_ms, decimals=0, suffix=" ms",
+            tooltip="How long brightness is held down near black before the delayed flash actually happens.",
+        )
+        self.beat_dark_depth_slider = FloatSlider(
+            "Dark pulse depth", 0.0, 1.0, bs.dark_pulse_depth, decimals=2,
+            tooltip="How far toward black the dip goes - 1.0 = fully black for the duration above, "
+            "lower = a partial dim instead of a total blackout.",
+        )
         for w in (self.beat_dark_prob_slider, self.beat_dark_duration_slider, self.beat_dark_depth_slider):
+            w.valueChanged.connect(self._on_beat_changed)
+            beat_layout.addWidget(w)
+
+        beat_white_pulse_note = QLabel(
+            "White pulses: on a random subset of beats, briefly push saturation toward one extreme "
+            "right as the flash happens - e.g. a hi-hat/cymbal accent snapping to near-white for an "
+            "instant. Eligible only on beats dominated by the frequency band below (hi-hat/cymbal by "
+            "default) - independent of dark pulses above, and mutually exclusive per beat with them "
+            "(see the dark pulse band's tooltip). Note that BOTH pulse types only ever fire on a beat "
+            "detected by the main 'Beat detection band' higher up - widen that band if you want hits "
+            "outside the kick range (e.g. hi-hat-only hits) to be able to trigger a pulse at all."
+        )
+        beat_white_pulse_note.setWordWrap(True)
+        beat_layout.addWidget(beat_white_pulse_note)
+
+        self.beat_white_pulse_enabled_checkbox = QCheckBox("Enabled")
+        self.beat_white_pulse_enabled_checkbox.setChecked(bs.white_pulse_enabled)
+        self.beat_white_pulse_enabled_checkbox.setToolTip(
+            "Turns the white/saturation-pulse accent on or off - leave unchecked if you never want "
+            "this effect (dark pulses above are unaffected either way)."
+        )
+        self.beat_white_pulse_enabled_checkbox.toggled.connect(self._on_beat_changed)
+        beat_layout.addWidget(self.beat_white_pulse_enabled_checkbox)
+
+        self.beat_white_pulse_invert_checkbox = QCheckBox(
+            "Invert (saturate toward full color instead of desaturating toward white)"
+        )
+        self.beat_white_pulse_invert_checkbox.setChecked(bs.white_pulse_invert)
+        self.beat_white_pulse_invert_checkbox.setToolTip(
+            "Off: the pulse desaturates the color toward white (saturation -> 0). On: it instead "
+            "saturates toward a fully vivid color (saturation -> 1) - useful if the base Saturation "
+            "above is already fairly pastel, where pulsing further toward white wouldn't read as an accent."
+        )
+        self.beat_white_pulse_invert_checkbox.toggled.connect(self._on_beat_changed)
+        beat_layout.addWidget(self.beat_white_pulse_invert_checkbox)
+
+        white_detect_row = QHBoxLayout()
+        white_detect_row.addWidget(QLabel("White pulse detection band:"))
+        self.beat_white_low_spin = QSpinBox()
+        self.beat_white_low_spin.setRange(20, 20000)
+        self.beat_white_low_spin.setSuffix(" Hz")
+        self.beat_white_low_spin.setValue(int(bs.white_pulse_detect_low_hz))
+        self.beat_white_low_spin.setToolTip(
+            "Which frequency content a beat needs to be dominated by to be ELIGIBLE for a white pulse "
+            "at all - tuned for hi-hat/cymbal hits by default. See the dark pulse detection band's "
+            "tooltip above - whichever of the two bands is louder at a given beat is the only one "
+            "allowed to roll its own probability there."
+        )
+        white_detect_row.addWidget(self.beat_white_low_spin)
+        white_detect_row.addWidget(QLabel("-"))
+        self.beat_white_high_spin = QSpinBox()
+        self.beat_white_high_spin.setRange(20, 20000)
+        self.beat_white_high_spin.setSuffix(" Hz")
+        self.beat_white_high_spin.setValue(int(bs.white_pulse_detect_high_hz))
+        self.beat_white_high_spin.setToolTip(self.beat_white_low_spin.toolTip())
+        white_detect_row.addWidget(self.beat_white_high_spin)
+        white_detect_row.addStretch(1)
+        beat_layout.addLayout(white_detect_row)
+
+        self.beat_white_pulse_prob_slider = FloatSlider(
+            "White pulse probability", 0.0, 1.0, bs.white_pulse_probability, decimals=2,
+            tooltip="Chance that a given beat DOMINATED BY THE BAND ABOVE gets this saturation pulse "
+            "- 0 = never, 1 = every eligible beat.",
+        )
+        self.beat_white_pulse_duration_slider = FloatSlider(
+            "White pulse duration", 10.0, 500.0, bs.white_pulse_duration_ms, decimals=0, suffix=" ms",
+            tooltip="How long saturation is held at the extreme (white, or fully vivid if inverted) "
+            "before it starts easing back to the base Saturation.",
+        )
+        self.beat_white_pulse_depth_slider = FloatSlider(
+            "White pulse depth", 0.0, 1.0, bs.white_pulse_depth, decimals=2,
+            tooltip="How far toward the extreme the pulse pushes saturation - 1.0 = all the way to "
+            "white/fully vivid, lower = a partial push instead.",
+        )
+        self.beat_white_pulse_attack_slider = FloatSlider(
+            "White pulse attack", 1.0, 300.0, bs.white_pulse_attack_ms, decimals=0, suffix=" ms",
+            tooltip="How fast saturation snaps to the extreme when the pulse starts - low = an "
+            "instant flash to white/vivid, right on the beat.",
+        )
+        self.beat_white_pulse_release_slider = FloatSlider(
+            "White pulse release", 10.0, 1000.0, bs.white_pulse_release_ms, decimals=0, suffix=" ms",
+            tooltip="How slowly saturation eases back to the base Saturation value once the pulse's "
+            "duration ends - higher means a longer visible fade back to normal color.",
+        )
+        for w in (
+            self.beat_white_pulse_prob_slider,
+            self.beat_white_pulse_duration_slider,
+            self.beat_white_pulse_depth_slider,
+            self.beat_white_pulse_attack_slider,
+            self.beat_white_pulse_release_slider,
+        ):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
 
         self.beat_low_spin.valueChanged.connect(self._on_beat_changed)
         self.beat_high_spin.valueChanged.connect(self._on_beat_changed)
+        self.beat_dark_low_spin.valueChanged.connect(self._on_beat_changed)
+        self.beat_dark_high_spin.valueChanged.connect(self._on_beat_changed)
+        self.beat_white_low_spin.valueChanged.connect(self._on_beat_changed)
+        self.beat_white_high_spin.valueChanged.connect(self._on_beat_changed)
 
         sub_tabs.addTab(beat_widget, "Beat Sync")
 
@@ -499,6 +687,17 @@ class ColorMappingTab(QWidget):
         bs.dark_pulse_probability = self.beat_dark_prob_slider.value()
         bs.dark_pulse_duration_ms = self.beat_dark_duration_slider.value()
         bs.dark_pulse_depth = self.beat_dark_depth_slider.value()
+        bs.dark_pulse_detect_low_hz = self.beat_dark_low_spin.value()
+        bs.dark_pulse_detect_high_hz = self.beat_dark_high_spin.value()
+        bs.white_pulse_enabled = self.beat_white_pulse_enabled_checkbox.isChecked()
+        bs.white_pulse_invert = self.beat_white_pulse_invert_checkbox.isChecked()
+        bs.white_pulse_probability = self.beat_white_pulse_prob_slider.value()
+        bs.white_pulse_duration_ms = self.beat_white_pulse_duration_slider.value()
+        bs.white_pulse_depth = self.beat_white_pulse_depth_slider.value()
+        bs.white_pulse_attack_ms = self.beat_white_pulse_attack_slider.value()
+        bs.white_pulse_release_ms = self.beat_white_pulse_release_slider.value()
+        bs.white_pulse_detect_low_hz = self.beat_white_low_spin.value()
+        bs.white_pulse_detect_high_hz = self.beat_white_high_spin.value()
         self.controller.apply_config_changes()
 
     def _on_beat_white_changed(self, *_args) -> None:

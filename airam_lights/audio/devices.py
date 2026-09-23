@@ -24,6 +24,15 @@ class LoopbackDeviceInfo:
     is_default: bool = False
 
 
+@dataclass
+class InputDeviceInfo:
+    index: int
+    name: str
+    samplerate: int
+    channels: int
+    is_default: bool = False
+
+
 def list_loopback_devices() -> List[LoopbackDeviceInfo]:
     """Return all WASAPI loopback-capable devices currently available.
 
@@ -65,5 +74,53 @@ def list_loopback_devices() -> List[LoopbackDeviceInfo]:
                 )
     except Exception:
         logger.exception("Failed to enumerate WASAPI loopback devices")
+
+    return devices
+
+
+def list_microphone_devices() -> List[InputDeviceInfo]:
+    """Return real microphone/line-in recording devices (WASAPI host API,
+    explicitly excluding the loopback pseudo-devices list_loopback_devices()
+    returns) - lets the "Microphone" audio source list actual recording
+    hardware, for testing how the lights react to real room/ambient sound
+    instead of only to whatever's currently playing through Windows.
+
+    Same safe-on-missing-driver behavior as list_loopback_devices(): returns
+    an empty list and logs the reason instead of raising."""
+    try:
+        import pyaudiowpatch as pyaudio
+    except ImportError:
+        logger.error("PyAudioWPatch is not installed - cannot enumerate microphone devices")
+        return []
+
+    devices: List[InputDeviceInfo] = []
+    try:
+        with pyaudio.PyAudio() as p:
+            default_index: Optional[int] = None
+            try:
+                default_index = p.get_default_input_device_info()["index"]
+            except OSError:
+                logger.warning("No default input device reported by the OS")
+
+            wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
+            for i in range(p.get_device_count()):
+                info = p.get_device_info_by_index(i)
+                if info.get("hostApi") != wasapi_info["index"]:
+                    continue
+                if info.get("isLoopbackDevice"):
+                    continue
+                if int(info.get("maxInputChannels", 0)) <= 0:
+                    continue
+                devices.append(
+                    InputDeviceInfo(
+                        index=i,
+                        name=info["name"],
+                        samplerate=int(info["defaultSampleRate"]),
+                        channels=int(info["maxInputChannels"]),
+                        is_default=(i == default_index),
+                    )
+                )
+    except Exception:
+        logger.exception("Failed to enumerate microphone devices")
 
     return devices

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...audio.devices import list_loopback_devices
+from ...audio.devices import list_loopback_devices, list_microphone_devices
 from ..controller import AppController
 from ..widgets.level_meter import LevelMeter
 from ..widgets.param_slider import FloatSlider
@@ -41,9 +41,32 @@ class VisualizerTab(QWidget):
         root = QVBoxLayout(self)
 
         # -- audio -----------------------------------------------------------------
-        audio_box = QGroupBox("Audio (WASAPI loopback)")
+        audio_box = QGroupBox("Audio")
         audio_layout = QVBoxLayout(audio_box)
-        device_row = QHBoxLayout()
+        audio_cfg = controller.config.audio
+
+        source_row = QHBoxLayout()
+        source_row.addWidget(QLabel("Source:"))
+        self.source_group = QButtonGroup(self)
+        self.loopback_radio = QRadioButton("Loopback (what you hear)")
+        self.mic_radio = QRadioButton("Microphone")
+        self.source_group.addButton(self.loopback_radio)
+        self.source_group.addButton(self.mic_radio)
+        source_row.addWidget(self.loopback_radio)
+        source_row.addWidget(self.mic_radio)
+        source_row.addStretch(1)
+        audio_layout.addLayout(source_row)
+        audio_layout.addWidget(
+            QLabel(
+                "Microphone reacts to real room/ambient sound (e.g. talking, clapping, playing an "
+                "instrument nearby) instead of only whatever's playing through Windows - handy for "
+                "testing without routing any specific playback source."
+            )
+        )
+
+        self.loopback_device_widget = QWidget()
+        device_row = QHBoxLayout(self.loopback_device_widget)
+        device_row.setContentsMargins(0, 0, 0, 0)
         device_row.addWidget(QLabel("Loopback device:"))
         self.device_combo = QComboBox()
         self._populate_devices()
@@ -52,7 +75,38 @@ class VisualizerTab(QWidget):
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self._populate_devices)
         device_row.addWidget(refresh_btn)
-        audio_layout.addLayout(device_row)
+        audio_layout.addWidget(self.loopback_device_widget)
+
+        # One container for everything mic-specific (device picker + gain +
+        # its note) so a single setVisible() toggles all of it together.
+        self.mic_device_widget = QWidget()
+        mic_section = QVBoxLayout(self.mic_device_widget)
+        mic_section.setContentsMargins(0, 0, 0, 0)
+
+        mic_device_row = QHBoxLayout()
+        mic_device_row.addWidget(QLabel("Microphone device:"))
+        self.mic_combo = QComboBox()
+        self._populate_mic_devices()
+        self.mic_combo.currentIndexChanged.connect(self._on_mic_device_changed)
+        mic_device_row.addWidget(self.mic_combo, stretch=1)
+        mic_refresh_btn = QPushButton("Refresh")
+        mic_refresh_btn.clicked.connect(self._populate_mic_devices)
+        mic_device_row.addWidget(mic_refresh_btn)
+        mic_section.addLayout(mic_device_row)
+
+        self.mic_gain_slider = FloatSlider(
+            "Microphone sensitivity (gain)", 0.1, 10.0, audio_cfg.mic_gain, decimals=2, suffix="x"
+        )
+        self.mic_gain_slider.valueChanged.connect(self._on_mic_gain_changed)
+        mic_section.addWidget(self.mic_gain_slider)
+        mic_gain_note = QLabel("Microphones are usually much quieter than loopback - raise this if it barely reacts.")
+        mic_gain_note.setWordWrap(True)
+        mic_section.addWidget(mic_gain_note)
+        audio_layout.addWidget(self.mic_device_widget)
+
+        self.loopback_radio.toggled.connect(self._on_source_changed)
+        (self.mic_radio if audio_cfg.source == "microphone" else self.loopback_radio).setChecked(True)
+        self._update_source_visibility()
 
         self.level_meter = LevelMeter()
         audio_layout.addWidget(QLabel("Level:"))
@@ -139,6 +193,39 @@ class VisualizerTab(QWidget):
     def _on_device_changed(self, row: int) -> None:
         device_index = self.device_combo.itemData(row)
         self.controller.set_audio_device(device_index)
+
+    def _populate_mic_devices(self) -> None:
+        self.mic_combo.blockSignals(True)
+        self.mic_combo.clear()
+        devices = list_microphone_devices()
+        current_index = self.controller.config.audio.mic_device_index
+        select_row = 0
+        for row, d in enumerate(devices):
+            label = f"{d.name}{' (default)' if d.is_default else ''}"
+            self.mic_combo.addItem(label, d.index)
+            if d.index == current_index:
+                select_row = row
+        if devices:
+            self.mic_combo.setCurrentIndex(select_row)
+        else:
+            self.mic_combo.addItem("No microphone/recording device found", None)
+        self.mic_combo.blockSignals(False)
+
+    def _on_mic_device_changed(self, row: int) -> None:
+        mic_device_index = self.mic_combo.itemData(row)
+        self.controller.set_mic_device(mic_device_index)
+
+    def _on_mic_gain_changed(self, value: float) -> None:
+        self.controller.set_mic_gain(value)
+
+    def _on_source_changed(self, loopback_checked: bool) -> None:
+        self.controller.set_audio_source("loopback" if loopback_checked else "microphone")
+        self._update_source_visibility()
+
+    def _update_source_visibility(self) -> None:
+        is_mic = self.mic_radio.isChecked()
+        self.loopback_device_widget.setVisible(not is_mic)
+        self.mic_device_widget.setVisible(is_mic)
 
     def _on_audio_error(self, message: str) -> None:
         self.status_label.setText(f"Audio error: {message}")

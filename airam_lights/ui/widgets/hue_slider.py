@@ -21,12 +21,15 @@ _STEPS = 360
 class HueSlider(QWidget):
     valueChanged = Signal(float)
 
-    def __init__(self, label: str, value: float = 0.0, parent=None):
+    def __init__(self, label: str, value: float = 0.0, tooltip: str = "", parent=None):
         super().__init__(parent)
         self._updating = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        if tooltip:
+            self.setToolTip(tooltip)
 
         self._label = QLabel(label)
         self._label.setMinimumWidth(120)

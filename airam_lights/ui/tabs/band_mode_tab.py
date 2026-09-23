@@ -49,6 +49,7 @@ _EFFECT_COLUMNS = [
     "Sensitivity x",
     "Chase order",
     "Chase dwell x",
+    "Effect group",
 ]
 
 
@@ -86,6 +87,9 @@ class BandModeTab(QWidget):
 
         chase_page, chase_root = _scroll_page()
         sub_tabs.addTab(chase_page, "Chase Overlay")
+
+        group_switch_page, group_switch_root = _scroll_page()
+        sub_tabs.addTab(group_switch_page, "Group Switch")
 
         # -- band definitions -------------------------------------------------------
         band_box = QGroupBox("8-Band definitions (default: one band per lamp)")
@@ -138,11 +142,13 @@ class BandModeTab(QWidget):
         effects_layout = QVBoxLayout(effects_box)
         effects_label = QLabel(
             "Set band assignment (8-Band mode), a small delay for wave/chase effects, "
-            "per-lamp brightness/saturation/hue/sensitivity multipliers, and 'Chase dwell x' "
+            "per-lamp brightness/saturation/hue/sensitivity multipliers, 'Chase dwell x' "
             "- how long the Chase overlay's highlight lingers at this lamp's chase position "
             "relative to others (1.0 = default; lower it for a position with several lamps "
             "at once, e.g. a multi-spot ceiling fixture, if the highlight feels like it's "
-            "dwelling there too long)."
+            "dwelling there too long) - and 'Effect group', a separate, independent grouping "
+            "used by the Group Switch tab (a lamp can have a Chase order, an Effect group, "
+            "both, or neither)."
         )
         effects_label.setWordWrap(True)
         effects_layout.addWidget(effects_label)
@@ -374,6 +380,182 @@ class BandModeTab(QWidget):
 
         chase_root.addWidget(chase_box)
 
+        # -- group switch: discrete alternative to the chase overlay above --------------------
+        gs_box = QGroupBox("Group Switch (discrete alternative to Chase - no gradient between groups)")
+        gs_outer_layout = QVBoxLayout(gs_box)
+        gs_intro_label = QLabel(
+            "Set 'Effect group' (0, 1, 2, ...) on the lamps in the Per-Lamp Effects tab to include "
+            "them here, in that order - a SEPARATE grouping from Chase's 'Chase order' above, so a "
+            "lamp can be in the Chase, in a Group Switch group, both, or neither. Unlike Chase, "
+            "exactly one group is 'active' at a time and shows the target color at full strength - "
+            "every other group is left completely untouched. No width/falloff: switching from one "
+            "active group to the next is instant, a hard step rather than a gradient."
+        )
+        gs_intro_label.setWordWrap(True)
+        gs_outer_layout.addWidget(gs_intro_label)
+
+        gs_columns_row = QHBoxLayout()
+        gs_outer_layout.addLayout(gs_columns_row)
+        gs_speed_widget = QWidget()
+        gs_appearance_widget = QWidget()
+        gs_speed_col = QVBoxLayout(gs_speed_widget)
+        gs_appearance_col = QVBoxLayout(gs_appearance_widget)
+        gs_speed_col.setContentsMargins(0, 0, 0, 0)
+        gs_appearance_col.setContentsMargins(0, 0, 0, 0)
+        gs_columns_row.addWidget(gs_speed_widget, 1)
+        gs_columns_row.addWidget(gs_appearance_widget, 1)
+        gs = controller.config.group_switch
+
+        # -- left column: enable/speed/sync ------------------------------------------
+        self.gs_enabled_checkbox = QCheckBox("Enabled")
+        self.gs_enabled_checkbox.setChecked(gs.enabled)
+        self.gs_enabled_checkbox.toggled.connect(self._on_group_switch_changed)
+        gs_speed_col.addWidget(self.gs_enabled_checkbox)
+
+        self.gs_speed_slider = FloatSlider(
+            "Speed (constant)", 0.02, 5.0, gs.speed_rotations_per_s, decimals=3, suffix=" switches/s"
+        )
+        self.gs_speed_slider.valueChanged.connect(self._on_group_switch_changed)
+        gs_speed_col.addWidget(self.gs_speed_slider)
+        gs_speed_label = QLabel(
+            "This is full loops through all groups per second - e.g. 0.5 = one full loop every 2 "
+            "seconds, regardless of how many groups there are."
+        )
+        gs_speed_label.setWordWrap(True)
+        gs_speed_col.addWidget(gs_speed_label)
+
+        self.gs_reverse_checkbox = QCheckBox("Reverse direction")
+        self.gs_reverse_checkbox.setChecked(gs.reverse)
+        self.gs_reverse_checkbox.toggled.connect(self._on_group_switch_changed)
+        gs_speed_col.addWidget(self.gs_reverse_checkbox)
+
+        gs_sync_mode_row = QHBoxLayout()
+        gs_sync_mode_row.addWidget(QLabel("Speed source:"))
+        self.gs_sync_mode_combo = QComboBox()
+        self.gs_sync_mode_combo.addItems(["off", "beat", "intensity_peak"])
+        self.gs_sync_mode_combo.setCurrentText(gs.sync_mode)
+        self.gs_sync_mode_combo.currentTextChanged.connect(self._on_group_switch_changed)
+        gs_sync_mode_row.addWidget(self.gs_sync_mode_combo)
+        gs_sync_mode_row.addStretch(1)
+        gs_speed_col.addLayout(gs_sync_mode_row)
+        gs_sync_mode_label = QLabel(
+            "off: constant speed above, ignoring audio. beat: sits still and only switches on a "
+            "detected bass-drum-style hit. intensity_peak: sits still and only switches on ANY sudden "
+            "loudness spike (better for tracks without a strong, steady beat). Both hit-based modes "
+            "never switch on their own between hits - they move only with the actual rhythm."
+        )
+        gs_sync_mode_label.setWordWrap(True)
+        gs_speed_col.addWidget(gs_sync_mode_label)
+
+        self.gs_multiplier_slider = FloatSlider(
+            "Groups per hit", 0.125, 8.0, gs.beat_multiplier, decimals=3, suffix="x"
+        )
+        self.gs_multiplier_slider.valueChanged.connect(self._on_group_switch_changed)
+        gs_speed_col.addWidget(self.gs_multiplier_slider)
+        gs_multiplier_label = QLabel(
+            "1 = advance one group per hit, 2 = twice as fast (two groups per hit), 0.5 = half as "
+            "fast (one group every two hits). Applies to both beat and intensity_peak modes."
+        )
+        gs_multiplier_label.setWordWrap(True)
+        gs_speed_col.addWidget(gs_multiplier_label)
+
+        gs_beat_detect_row = QHBoxLayout()
+        gs_beat_detect_row.addWidget(QLabel("Beat detection band:"))
+        self.gs_beat_low_spin = QSpinBox()
+        self.gs_beat_low_spin.setRange(20, 20000)
+        self.gs_beat_low_spin.setSuffix(" Hz")
+        self.gs_beat_low_spin.setValue(int(gs.beat_detect_low_hz))
+        gs_beat_detect_row.addWidget(self.gs_beat_low_spin)
+        gs_beat_detect_row.addWidget(QLabel("-"))
+        self.gs_beat_high_spin = QSpinBox()
+        self.gs_beat_high_spin.setRange(20, 20000)
+        self.gs_beat_high_spin.setSuffix(" Hz")
+        self.gs_beat_high_spin.setValue(int(gs.beat_detect_high_hz))
+        gs_beat_detect_row.addWidget(self.gs_beat_high_spin)
+        gs_beat_detect_row.addStretch(1)
+        gs_speed_col.addLayout(gs_beat_detect_row)
+
+        self.gs_beat_sensitivity_slider = FloatSlider("Beat sensitivity", 1.05, 4.0, gs.beat_sensitivity, decimals=2)
+        self.gs_beat_min_interval_slider = FloatSlider(
+            "Beat min interval", 30.0, 1000.0, gs.beat_min_interval_ms, decimals=0, suffix=" ms"
+        )
+
+        gs_peak_detect_row = QHBoxLayout()
+        gs_peak_detect_row.addWidget(QLabel("Intensity-peak detection band:"))
+        self.gs_peak_low_spin = QSpinBox()
+        self.gs_peak_low_spin.setRange(20, 20000)
+        self.gs_peak_low_spin.setSuffix(" Hz")
+        self.gs_peak_low_spin.setValue(int(gs.peak_detect_low_hz))
+        gs_peak_detect_row.addWidget(self.gs_peak_low_spin)
+        gs_peak_detect_row.addWidget(QLabel("-"))
+        self.gs_peak_high_spin = QSpinBox()
+        self.gs_peak_high_spin.setRange(20, 20000)
+        self.gs_peak_high_spin.setSuffix(" Hz")
+        self.gs_peak_high_spin.setValue(int(gs.peak_detect_high_hz))
+        gs_peak_detect_row.addWidget(self.gs_peak_high_spin)
+        gs_peak_detect_row.addStretch(1)
+        gs_speed_col.addLayout(gs_peak_detect_row)
+
+        self.gs_peak_sensitivity_slider = FloatSlider("Peak sensitivity", 1.05, 4.0, gs.peak_sensitivity, decimals=2)
+        self.gs_peak_min_interval_slider = FloatSlider(
+            "Peak min interval", 30.0, 1000.0, gs.peak_min_interval_ms, decimals=0, suffix=" ms"
+        )
+        for w in (
+            self.gs_beat_sensitivity_slider,
+            self.gs_beat_min_interval_slider,
+            self.gs_peak_sensitivity_slider,
+            self.gs_peak_min_interval_slider,
+        ):
+            w.valueChanged.connect(self._on_group_switch_changed)
+            gs_speed_col.addWidget(w)
+        gs_speed_col.addStretch(1)
+
+        # -- right column: intensity/color appearance --------------------------------
+        self.gs_intensity_slider = FloatSlider("Intensity (brightness boost)", 0.0, 8.0, gs.intensity, decimals=2)
+        self.gs_intensity_slider.valueChanged.connect(self._on_group_switch_changed)
+        gs_appearance_col.addWidget(self.gs_intensity_slider)
+        gs_intensity_label = QLabel(
+            "Multiplies the lamp's own current brightness on the active group (never adds light "
+            "where the active mode says black - e.g. a Beat Sync dark pulse stays dark)."
+        )
+        gs_intensity_label.setWordWrap(True)
+        gs_appearance_col.addWidget(gs_intensity_label)
+
+        gs_color_mode_row = QHBoxLayout()
+        gs_color_mode_row.addWidget(QLabel("Group color:"))
+        self.gs_color_mode_combo = QComboBox()
+        self.gs_color_mode_combo.addItems(["custom", "complementary", "hue_shift"])
+        self.gs_color_mode_combo.setCurrentText(gs.color_mode)
+        self.gs_color_mode_combo.currentTextChanged.connect(self._on_group_switch_changed)
+        gs_color_mode_row.addWidget(self.gs_color_mode_combo)
+        gs_color_mode_row.addStretch(1)
+        gs_appearance_col.addLayout(gs_color_mode_row)
+        gs_color_mode_label = QLabel(
+            "custom: a fixed color you set below, shown on whichever group is currently active. "
+            "complementary: the opposite hue of that group's own current color. hue_shift: each "
+            "group shows a different hue starting from the custom hue below, stepped by 'Hue shift "
+            "step' per group - so which color flashes on depends on which group is active."
+        )
+        gs_color_mode_label.setWordWrap(True)
+        gs_appearance_col.addWidget(gs_color_mode_label)
+
+        self.gs_hue_slider = HueSlider("Custom hue", gs.custom_hue_deg)
+        self.gs_sat_slider = FloatSlider("Custom saturation", 0.0, 1.0, gs.custom_saturation)
+        self.gs_hue_shift_slider = FloatSlider(
+            "Hue shift step (for 'hue_shift')", 1.0, 180.0, gs.hue_shift_step_deg, decimals=1, suffix=" deg"
+        )
+        for w in (self.gs_hue_slider, self.gs_sat_slider, self.gs_hue_shift_slider):
+            w.valueChanged.connect(self._on_group_switch_changed)
+            gs_appearance_col.addWidget(w)
+        gs_appearance_col.addStretch(1)
+
+        self.gs_beat_low_spin.valueChanged.connect(self._on_group_switch_changed)
+        self.gs_beat_high_spin.valueChanged.connect(self._on_group_switch_changed)
+        self.gs_peak_low_spin.valueChanged.connect(self._on_group_switch_changed)
+        self.gs_peak_high_spin.valueChanged.connect(self._on_group_switch_changed)
+
+        group_switch_root.addWidget(gs_box)
+
         controller.lampsChanged.connect(self._populate_effects_table)
         self._populate_effects_table()
 
@@ -467,6 +649,15 @@ class BandModeTab(QWidget):
 
             self._add_spin(row, 8, dev.config.id, "chase_dwell_mult", 0.1, 10.0, effect.chase_dwell_mult)
 
+            group_spin = QSpinBox()
+            group_spin.setRange(-1, max(7, len(devices) - 1))
+            group_spin.setSpecialValueText("Off")
+            group_spin.setValue(effect.effect_group if effect.effect_group is not None else -1)
+            group_spin.valueChanged.connect(
+                lambda v, d=dev.config.id: self._on_effect_changed(d, "effect_group", (v if v >= 0 else None))
+            )
+            self.effects_table.setCellWidget(row, 9, group_spin)
+
     def _add_spin(self, row: int, col: int, device_id: str, attr: str, lo: float, hi: float, value: float) -> None:
         spin = QDoubleSpinBox()
         spin.setRange(lo, hi)
@@ -509,4 +700,28 @@ class BandModeTab(QWidget):
         ch.custom_hue_deg = self.chase_hue_slider.value()
         ch.custom_saturation = self.chase_sat_slider.value()
         ch.hue_shift_step_deg = self.chase_hue_shift_slider.value()
+        self.controller.apply_config_changes()
+
+    # -- group switch overlay --------------------------------------------------------------
+
+    def _on_group_switch_changed(self, *_args) -> None:
+        gs = self.controller.config.group_switch
+        gs.enabled = self.gs_enabled_checkbox.isChecked()
+        gs.speed_rotations_per_s = self.gs_speed_slider.value()
+        gs.reverse = self.gs_reverse_checkbox.isChecked()
+        gs.sync_mode = self.gs_sync_mode_combo.currentText()
+        gs.beat_multiplier = self.gs_multiplier_slider.value()
+        gs.beat_detect_low_hz = self.gs_beat_low_spin.value()
+        gs.beat_detect_high_hz = self.gs_beat_high_spin.value()
+        gs.beat_sensitivity = self.gs_beat_sensitivity_slider.value()
+        gs.beat_min_interval_ms = self.gs_beat_min_interval_slider.value()
+        gs.peak_detect_low_hz = self.gs_peak_low_spin.value()
+        gs.peak_detect_high_hz = self.gs_peak_high_spin.value()
+        gs.peak_sensitivity = self.gs_peak_sensitivity_slider.value()
+        gs.peak_min_interval_ms = self.gs_peak_min_interval_slider.value()
+        gs.intensity = self.gs_intensity_slider.value()
+        gs.color_mode = self.gs_color_mode_combo.currentText()
+        gs.custom_hue_deg = self.gs_hue_slider.value()
+        gs.custom_saturation = self.gs_sat_slider.value()
+        gs.hue_shift_step_deg = self.gs_hue_shift_slider.value()
         self.controller.apply_config_changes()

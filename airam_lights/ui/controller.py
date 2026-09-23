@@ -51,6 +51,9 @@ class AppController(QObject):
 
         self.audio = AudioCapture(
             device_index=self.config.audio.device_index,
+            source=self.config.audio.source,
+            mic_device_index=self.config.audio.mic_device_index,
+            mic_gain=self.config.audio.mic_gain,
             block_size=self.config.audio.block_size,
         )
         self.lamp_manager = LampManager(
@@ -109,6 +112,29 @@ class AppController(QObject):
         self.config.audio.device_index = device_index
         if was_running:
             self.start_audio()
+
+    def set_audio_source(self, source: str) -> None:
+        """Switch between "loopback" (system playback) and "microphone"
+        (a real recording device) - restarts capture on the new source if
+        it was already running, exactly like set_audio_device()."""
+        was_running = self.audio.is_running()
+        self.audio.stop()
+        self.audio.source = source
+        self.config.audio.source = source
+        if was_running:
+            self.start_audio()
+
+    def set_mic_device(self, mic_device_index) -> None:
+        was_running = self.audio.is_running()
+        self.audio.stop()
+        self.audio.mic_device_index = mic_device_index
+        self.config.audio.mic_device_index = mic_device_index
+        if was_running:
+            self.start_audio()
+
+    def set_mic_gain(self, gain: float) -> None:
+        self.audio.mic_gain = gain
+        self.config.audio.mic_gain = gain
 
     # -- visualization lifecycle ------------------------------------------------
 

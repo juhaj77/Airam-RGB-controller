@@ -22,6 +22,7 @@ class FloatSlider(QWidget):
         value: float = 0.0,
         decimals: int = 2,
         suffix: str = "",
+        tooltip: str = "",
         parent=None,
     ):
         super().__init__(parent)
@@ -31,6 +32,12 @@ class FloatSlider(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        if tooltip:
+            # Set on the whole row, not just the label - Qt falls back to a
+            # parent's tooltip for any child (slider, spinbox) that doesn't
+            # have its own, so this covers the whole control either way.
+            self.setToolTip(tooltip)
 
         self._label = QLabel(label)
         self._label.setMinimumWidth(120)

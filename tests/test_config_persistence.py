@@ -20,6 +20,7 @@ from airam_lights.config.schema import (
     ChaseEffectConfig,
     ColorMappingConfig,
     DeviceConfig,
+    GroupSwitchEffectConfig,
     HSVModeConfig,
     NetworkConfig,
     PeakFlashModeConfig,
@@ -56,6 +57,10 @@ def _build_fully_populated_config() -> AppConfig:
         saturation=0.91, flash_brightness=0.92, sustain_brightness=0.26, hue_attack_ms=41.0,
         brightness_attack_ms=16.0, brightness_release_ms=351.0, dark_pulse_probability=0.31,
         dark_pulse_duration_ms=71.0, dark_pulse_depth=0.81,
+        dark_pulse_detect_low_hz=42.0, dark_pulse_detect_high_hz=6001.0, white_pulse_enabled=True,
+        white_pulse_invert=True, white_pulse_probability=0.41, white_pulse_duration_ms=91.0,
+        white_pulse_depth=0.71, white_pulse_attack_ms=17.0, white_pulse_release_ms=161.0,
+        white_pulse_detect_low_hz=6101.0, white_pulse_detect_high_hz=19001.0,
     )
     peak_flash = PeakFlashModeConfig(
         detect_low_hz=21.0, detect_high_hz=16001.0, sensitivity=1.31, min_interval_ms=61.0,
@@ -84,7 +89,7 @@ def _build_fully_populated_config() -> AppConfig:
     effect = PerLampEffect(
         device_id="dev-1", band_gains={"Band 1": 1.5}, phase_offset_ms=123.0,
         brightness_mult=1.4, saturation_mult=1.3, hue_offset_deg=45.0, sensitivity_mult=1.2,
-        band_index=3, chase_order=2, chase_dwell_mult=2.5,
+        band_index=3, chase_order=2, chase_dwell_mult=2.5, effect_group=1,
     )
 
     chase = ChaseEffectConfig(
@@ -96,6 +101,15 @@ def _build_fully_populated_config() -> AppConfig:
         intensity=3.3, falloff_curve="bezier", color_mode="hue_shift", custom_hue_deg=281.0,
         custom_saturation=0.92, hue_shift_step_deg=46.0,
     )
+    group_switch = GroupSwitchEffectConfig(
+        enabled=True, speed_rotations_per_s=0.55, reverse=True, sync_mode="intensity_peak",
+        beat_multiplier=1.75, beat_detect_low_hz=43.0, beat_detect_high_hz=203.0,
+        beat_sensitivity=1.63, beat_min_interval_ms=124.0, beat_min_energy=0.16,
+        peak_detect_low_hz=23.0, peak_detect_high_hz=15801.0, peak_sensitivity=1.36,
+        peak_min_interval_ms=66.0, peak_min_energy=0.10, intensity=3.4,
+        color_mode="complementary", custom_hue_deg=282.0, custom_saturation=0.93,
+        hue_shift_step_deg=47.0,
+    )
     white_chase = WhiteChaseEffectConfig(
         enabled=True, num_rotators=3, speed_rotations_per_s=0.33, width=0.71, intensity=1.6,
         falloff_curve="bezier", target_temp=0.9,
@@ -104,7 +118,10 @@ def _build_fully_populated_config() -> AppConfig:
         enabled=True, scene="temp_breathing", speed_hz=0.15, hue=190.0, saturation=0.81,
         brightness=0.83, min_brightness=0.07, temp_min=0.12, temp_max=0.88,
     )
-    audio = AudioConfig(device_index=3, samplerate=44100, block_size=2048, fft_size=4096, analysis_update_hz=45.0)
+    audio = AudioConfig(
+        device_index=3, samplerate=44100, block_size=2048, fft_size=4096, analysis_update_hz=45.0,
+        source="microphone", mic_device_index=7, mic_gain=2.5,
+    )
     network = NetworkConfig(
         visual_update_hz=25.0, lamp_command_rate_hz=15.0, command_timeout_s=0.4,
         max_retries=2, auto_backoff=False,
@@ -119,6 +136,7 @@ def _build_fully_populated_config() -> AppConfig:
         color_mapping=color_mapping,
         per_lamp_effects={"dev-1": effect},
         chase=chase,
+        group_switch=group_switch,
         white_chase=white_chase,
         ambient_scene=ambient,
         audio=audio,
@@ -163,6 +181,7 @@ def test_old_config_missing_newer_fields_loads_with_sane_defaults(tmp_path: Path
     assert cfg.devices[0].id == "old-1"
     assert cfg.color_mapping.mode == "rgb_freq"
     assert cfg.chase.enabled is False  # not present in the old file -> default
+    assert cfg.group_switch.enabled is False
     assert cfg.white_chase.enabled is False
     assert cfg.ambient_scene.enabled is False
     assert cfg.color_mapping.beat_sync_white.sensitivity == 1.6  # default preserved
@@ -182,6 +201,7 @@ def test_every_field_is_actually_different_from_default():
     fresh_default.bands_8 = populated.bands_8
     assert populated.color_mapping != fresh_default.color_mapping
     assert populated.chase != fresh_default.chase
+    assert populated.group_switch != fresh_default.group_switch
     assert populated.white_chase != fresh_default.white_chase
     assert populated.ambient_scene != fresh_default.ambient_scene
     assert populated.audio != fresh_default.audio
