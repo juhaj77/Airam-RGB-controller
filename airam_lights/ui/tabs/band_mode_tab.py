@@ -198,6 +198,10 @@ class BandModeTab(QWidget):
         # -- left column: enable/speed/sync -----------------------------------------
         self.chase_enabled_checkbox = QCheckBox("Enabled")
         self.chase_enabled_checkbox.setChecked(ch.enabled)
+        self.chase_enabled_checkbox.setToolTip(
+            "Turns the whole Chase overlay on or off - when off, whichever color mode is active "
+            "(RGB, HSV, 8-Band, Beat Sync, etc.) shows with no traveling highlight layered on top."
+        )
         self.chase_enabled_checkbox.toggled.connect(self._on_chase_changed)
         speed_col.addWidget(self.chase_enabled_checkbox)
 
@@ -206,6 +210,10 @@ class BandModeTab(QWidget):
         self.chase_num_rotators_spin = QSpinBox()
         self.chase_num_rotators_spin.setRange(1, 64)  # generous cap, not tied to any specific lamp count
         self.chase_num_rotators_spin.setValue(ch.num_rotators)
+        self.chase_num_rotators_spin.setToolTip(
+            "How many highlights travel the loop at once, evenly spaced and always moving together - "
+            "2 puts them on opposite sides, 3 a third apart, etc."
+        )
         self.chase_num_rotators_spin.valueChanged.connect(self._on_chase_changed)
         rotators_row.addWidget(self.chase_num_rotators_spin)
         rotators_row.addStretch(1)
@@ -218,7 +226,9 @@ class BandModeTab(QWidget):
         speed_col.addWidget(rotators_label)
 
         self.chase_speed_slider = FloatSlider(
-            "Speed (constant)", 0.02, 5.0, ch.speed_rotations_per_s, decimals=3, suffix=" rotations/s"
+            "Speed (constant)", 0.02, 5.0, ch.speed_rotations_per_s, decimals=3, suffix=" rotations/s",
+            tooltip="Only used when Speed source is 'off' - full laps around all chase-ordered lamps "
+            "per second, ignoring the audio entirely.",
         )
         self.chase_speed_slider.valueChanged.connect(self._on_chase_changed)
         speed_col.addWidget(self.chase_speed_slider)
@@ -231,6 +241,7 @@ class BandModeTab(QWidget):
 
         self.chase_reverse_checkbox = QCheckBox("Reverse direction")
         self.chase_reverse_checkbox.setChecked(ch.reverse)
+        self.chase_reverse_checkbox.setToolTip("Flips which way the highlight travels around the chase order.")
         self.chase_reverse_checkbox.toggled.connect(self._on_chase_changed)
         speed_col.addWidget(self.chase_reverse_checkbox)
 
@@ -239,6 +250,10 @@ class BandModeTab(QWidget):
         self.chase_sync_mode_combo = QComboBox()
         self.chase_sync_mode_combo.addItems(["off", "beat", "intensity_peak"])
         self.chase_sync_mode_combo.setCurrentText(ch.sync_mode)
+        self.chase_sync_mode_combo.setToolTip(
+            "off: use the constant Speed slider above. beat/intensity_peak: ignore that slider and "
+            "instead advance only when the matching detector below fires a hit."
+        )
         self.chase_sync_mode_combo.currentTextChanged.connect(self._on_chase_changed)
         sync_mode_row.addWidget(self.chase_sync_mode_combo)
         sync_mode_row.addStretch(1)
@@ -253,7 +268,9 @@ class BandModeTab(QWidget):
         speed_col.addWidget(sync_mode_label)
 
         self.chase_multiplier_slider = FloatSlider(
-            "Steps per hit", 0.125, 8.0, ch.beat_multiplier, decimals=3, suffix="x"
+            "Steps per hit", 0.125, 8.0, ch.beat_multiplier, decimals=3, suffix="x",
+            tooltip="Only used when Speed source is 'beat' or 'intensity_peak' - how many lamp-steps "
+            "the highlight advances on each detected hit.",
         )
         self.chase_multiplier_slider.valueChanged.connect(self._on_chase_changed)
         speed_col.addWidget(self.chase_multiplier_slider)
@@ -270,19 +287,32 @@ class BandModeTab(QWidget):
         self.chase_beat_low_spin.setRange(20, 20000)
         self.chase_beat_low_spin.setSuffix(" Hz")
         self.chase_beat_low_spin.setValue(int(ch.beat_detect_low_hz))
+        self.chase_beat_low_spin.setToolTip(
+            "Which frequencies count as a 'beat' at all, for the Chase overlay's own independent beat "
+            "detector (separate from Beat Sync mode's) - only used when Speed source is 'beat'."
+        )
         beat_detect_row.addWidget(self.chase_beat_low_spin)
         beat_detect_row.addWidget(QLabel("-"))
         self.chase_beat_high_spin = QSpinBox()
         self.chase_beat_high_spin.setRange(20, 20000)
         self.chase_beat_high_spin.setSuffix(" Hz")
         self.chase_beat_high_spin.setValue(int(ch.beat_detect_high_hz))
+        self.chase_beat_high_spin.setToolTip(self.chase_beat_low_spin.toolTip())
         beat_detect_row.addWidget(self.chase_beat_high_spin)
         beat_detect_row.addStretch(1)
         speed_col.addLayout(beat_detect_row)
 
-        self.chase_beat_sensitivity_slider = FloatSlider("Beat sensitivity", 1.05, 4.0, ch.beat_sensitivity, decimals=2)
+        self.chase_beat_sensitivity_slider = FloatSlider(
+            "Beat sensitivity", 1.05, 4.0, ch.beat_sensitivity, decimals=2,
+            tooltip="A beat fires when energy spikes above this multiple of the recent average - "
+            "LOWER value = more sensitive (triggers more easily, on smaller hits), HIGHER value = less "
+            "sensitive (only sharp, obvious hits register). This is a threshold, not a volume knob, so "
+            "it's the opposite direction you might expect from the word 'sensitivity'.",
+        )
         self.chase_beat_min_interval_slider = FloatSlider(
-            "Beat min interval", 30.0, 1000.0, ch.beat_min_interval_ms, decimals=0, suffix=" ms"
+            "Beat min interval", 30.0, 1000.0, ch.beat_min_interval_ms, decimals=0, suffix=" ms",
+            tooltip="Minimum time between two triggered beats - stops one sustained hit from "
+            "re-advancing the highlight many times in quick succession.",
         )
 
         peak_detect_row = QHBoxLayout()
@@ -291,19 +321,32 @@ class BandModeTab(QWidget):
         self.chase_peak_low_spin.setRange(20, 20000)
         self.chase_peak_low_spin.setSuffix(" Hz")
         self.chase_peak_low_spin.setValue(int(ch.peak_detect_low_hz))
+        self.chase_peak_low_spin.setToolTip(
+            "Which frequencies feed the 'intensity_peak' detector - broaden this (e.g. to the whole "
+            "audible range) to react to any sudden loud moment, not just bass. Only used when Speed "
+            "source is 'intensity_peak'."
+        )
         peak_detect_row.addWidget(self.chase_peak_low_spin)
         peak_detect_row.addWidget(QLabel("-"))
         self.chase_peak_high_spin = QSpinBox()
         self.chase_peak_high_spin.setRange(20, 20000)
         self.chase_peak_high_spin.setSuffix(" Hz")
         self.chase_peak_high_spin.setValue(int(ch.peak_detect_high_hz))
+        self.chase_peak_high_spin.setToolTip(self.chase_peak_low_spin.toolTip())
         peak_detect_row.addWidget(self.chase_peak_high_spin)
         peak_detect_row.addStretch(1)
         speed_col.addLayout(peak_detect_row)
 
-        self.chase_peak_sensitivity_slider = FloatSlider("Peak sensitivity", 1.05, 4.0, ch.peak_sensitivity, decimals=2)
+        self.chase_peak_sensitivity_slider = FloatSlider(
+            "Peak sensitivity", 1.05, 4.0, ch.peak_sensitivity, decimals=2,
+            tooltip="Same threshold logic as Beat sensitivity above, just applied to the "
+            "intensity-peak detector: LOWER = more sensitive/more triggers, HIGHER = fewer, only the "
+            "most obvious loudness spikes.",
+        )
         self.chase_peak_min_interval_slider = FloatSlider(
-            "Peak min interval", 30.0, 1000.0, ch.peak_min_interval_ms, decimals=0, suffix=" ms"
+            "Peak min interval", 30.0, 1000.0, ch.peak_min_interval_ms, decimals=0, suffix=" ms",
+            tooltip="Minimum time between two triggered peaks - stops one loud passage from "
+            "re-advancing the highlight many times in quick succession.",
         )
         for w in (
             self.chase_beat_sensitivity_slider,
@@ -316,8 +359,18 @@ class BandModeTab(QWidget):
         speed_col.addStretch(1)
 
         # -- right column: width/intensity/falloff/color appearance -----------------
-        self.chase_width_slider = FloatSlider("Highlight width", 0.2, 8.0, ch.width, decimals=2, suffix=" lamps")
-        self.chase_intensity_slider = FloatSlider("Intensity (brightness boost)", 0.0, 8.0, ch.intensity, decimals=2)
+        self.chase_width_slider = FloatSlider(
+            "Highlight width", 0.2, 8.0, ch.width, decimals=2, suffix=" lamps",
+            tooltip="How many lamp-positions the glow spans, with soft falloff. Scale with your lamp "
+            "count: lower (0.5-0.8) for a crisp single-dot look with few lamps, higher for a chase of "
+            "12+ lamps so it doesn't look like a single lamp popping on and off.",
+        )
+        self.chase_intensity_slider = FloatSlider(
+            "Intensity (brightness boost)", 0.0, 8.0, ch.intensity, decimals=2,
+            tooltip="A brightness BOOST multiplier on top of whatever the active mode already computed "
+            "for that lamp - never an independent/fixed brightness. A lamp the active mode has dimmed "
+            "to black (e.g. a Beat Sync dark pulse) stays black regardless of this value.",
+        )
         for w in (self.chase_width_slider, self.chase_intensity_slider):
             w.valueChanged.connect(self._on_chase_changed)
             appearance_col.addWidget(w)
@@ -334,6 +387,11 @@ class BandModeTab(QWidget):
         self.chase_falloff_curve_combo = QComboBox()
         self.chase_falloff_curve_combo.addItems(["linear", "bezier"])
         self.chase_falloff_curve_combo.setCurrentText(ch.falloff_curve)
+        self.chase_falloff_curve_combo.setToolTip(
+            "linear: constant-rate falloff, peak color is a single fleeting instant. bezier: an eased "
+            "S-curve that dwells near the peak (and the background) longer - try this if the highlight "
+            "feels like it flies by too quickly."
+        )
         self.chase_falloff_curve_combo.currentTextChanged.connect(self._on_chase_changed)
         chase_curve_row.addWidget(self.chase_falloff_curve_combo)
         chase_curve_row.addStretch(1)
@@ -351,6 +409,11 @@ class BandModeTab(QWidget):
         self.chase_color_mode_combo = QComboBox()
         self.chase_color_mode_combo.addItems(["custom", "complementary", "hue_shift"])
         self.chase_color_mode_combo.setCurrentText(ch.color_mode)
+        self.chase_color_mode_combo.setToolTip(
+            "custom: one fixed hue/saturation for the whole highlight. complementary: always the "
+            "opposite hue (+180 deg) of whatever that lamp's active mode is already showing. hue_shift: "
+            "each chase position gets a progressively different hue (a rainbow trail)."
+        )
         self.chase_color_mode_combo.currentTextChanged.connect(self._on_chase_changed)
         color_mode_row.addWidget(self.chase_color_mode_combo)
         color_mode_row.addStretch(1)
@@ -364,9 +427,18 @@ class BandModeTab(QWidget):
         appearance_col.addWidget(color_mode_label)
 
         self.chase_hue_slider = HueSlider("Custom hue", ch.custom_hue_deg)
-        self.chase_sat_slider = FloatSlider("Custom saturation", 0.0, 1.0, ch.custom_saturation)
+        self.chase_hue_slider.setToolTip(
+            "Used by 'custom' (the whole highlight's fixed color) and as the starting hue for "
+            "'hue_shift'. For the clearest effect, pick something far from your mode's usual palette."
+        )
+        self.chase_sat_slider = FloatSlider(
+            "Custom saturation", 0.0, 1.0, ch.custom_saturation,
+            tooltip="Saturation used by the 'custom' color mode only.",
+        )
         self.chase_hue_shift_slider = FloatSlider(
-            "Hue shift step (for 'hue_shift')", 1.0, 180.0, ch.hue_shift_step_deg, decimals=1, suffix=" deg"
+            "Hue shift step (for 'hue_shift')", 1.0, 180.0, ch.hue_shift_step_deg, decimals=1, suffix=" deg",
+            tooltip="Only used by the 'hue_shift' color mode - how far the hue advances from one chase "
+            "position to the next, starting from Custom hue above.",
         )
         for w in (self.chase_hue_slider, self.chase_sat_slider, self.chase_hue_shift_slider):
             w.valueChanged.connect(self._on_chase_changed)
@@ -409,11 +481,17 @@ class BandModeTab(QWidget):
         # -- left column: enable/speed/sync ------------------------------------------
         self.gs_enabled_checkbox = QCheckBox("Enabled")
         self.gs_enabled_checkbox.setChecked(gs.enabled)
+        self.gs_enabled_checkbox.setToolTip(
+            "Turns Group Switch on or off - when off, no group is forced 'active' and Chase (if also "
+            "enabled) is the only overlay running."
+        )
         self.gs_enabled_checkbox.toggled.connect(self._on_group_switch_changed)
         gs_speed_col.addWidget(self.gs_enabled_checkbox)
 
         self.gs_speed_slider = FloatSlider(
-            "Speed (constant)", 0.02, 5.0, gs.speed_rotations_per_s, decimals=3, suffix=" switches/s"
+            "Speed (constant)", 0.02, 5.0, gs.speed_rotations_per_s, decimals=3, suffix=" switches/s",
+            tooltip="Only used when Speed source is 'off' - full loops through all groups per second, "
+            "ignoring the audio entirely.",
         )
         self.gs_speed_slider.valueChanged.connect(self._on_group_switch_changed)
         gs_speed_col.addWidget(self.gs_speed_slider)
@@ -426,6 +504,7 @@ class BandModeTab(QWidget):
 
         self.gs_reverse_checkbox = QCheckBox("Reverse direction")
         self.gs_reverse_checkbox.setChecked(gs.reverse)
+        self.gs_reverse_checkbox.setToolTip("Flips which way the active group advances through the group order.")
         self.gs_reverse_checkbox.toggled.connect(self._on_group_switch_changed)
         gs_speed_col.addWidget(self.gs_reverse_checkbox)
 
@@ -434,6 +513,10 @@ class BandModeTab(QWidget):
         self.gs_sync_mode_combo = QComboBox()
         self.gs_sync_mode_combo.addItems(["off", "beat", "intensity_peak"])
         self.gs_sync_mode_combo.setCurrentText(gs.sync_mode)
+        self.gs_sync_mode_combo.setToolTip(
+            "off: use the constant Speed slider above. beat/intensity_peak: ignore that slider and "
+            "instead switch groups only when the matching detector below fires a hit."
+        )
         self.gs_sync_mode_combo.currentTextChanged.connect(self._on_group_switch_changed)
         gs_sync_mode_row.addWidget(self.gs_sync_mode_combo)
         gs_sync_mode_row.addStretch(1)
@@ -448,7 +531,9 @@ class BandModeTab(QWidget):
         gs_speed_col.addWidget(gs_sync_mode_label)
 
         self.gs_multiplier_slider = FloatSlider(
-            "Groups per hit", 0.125, 8.0, gs.beat_multiplier, decimals=3, suffix="x"
+            "Groups per hit", 0.125, 8.0, gs.beat_multiplier, decimals=3, suffix="x",
+            tooltip="Only used when Speed source is 'beat' or 'intensity_peak' - how many groups the "
+            "active switch advances on each detected hit.",
         )
         self.gs_multiplier_slider.valueChanged.connect(self._on_group_switch_changed)
         gs_speed_col.addWidget(self.gs_multiplier_slider)
@@ -465,19 +550,33 @@ class BandModeTab(QWidget):
         self.gs_beat_low_spin.setRange(20, 20000)
         self.gs_beat_low_spin.setSuffix(" Hz")
         self.gs_beat_low_spin.setValue(int(gs.beat_detect_low_hz))
+        self.gs_beat_low_spin.setToolTip(
+            "Which frequencies count as a 'beat' at all, for Group Switch's own independent beat "
+            "detector (separate from Chase's and from Beat Sync mode's) - only used when Speed source "
+            "is 'beat'."
+        )
         gs_beat_detect_row.addWidget(self.gs_beat_low_spin)
         gs_beat_detect_row.addWidget(QLabel("-"))
         self.gs_beat_high_spin = QSpinBox()
         self.gs_beat_high_spin.setRange(20, 20000)
         self.gs_beat_high_spin.setSuffix(" Hz")
         self.gs_beat_high_spin.setValue(int(gs.beat_detect_high_hz))
+        self.gs_beat_high_spin.setToolTip(self.gs_beat_low_spin.toolTip())
         gs_beat_detect_row.addWidget(self.gs_beat_high_spin)
         gs_beat_detect_row.addStretch(1)
         gs_speed_col.addLayout(gs_beat_detect_row)
 
-        self.gs_beat_sensitivity_slider = FloatSlider("Beat sensitivity", 1.05, 4.0, gs.beat_sensitivity, decimals=2)
+        self.gs_beat_sensitivity_slider = FloatSlider(
+            "Beat sensitivity", 1.05, 4.0, gs.beat_sensitivity, decimals=2,
+            tooltip="A beat fires when energy spikes above this multiple of the recent average - "
+            "LOWER value = more sensitive (triggers more easily, on smaller hits), HIGHER value = less "
+            "sensitive (only sharp, obvious hits register). This is a threshold, not a volume knob, so "
+            "it's the opposite direction you might expect from the word 'sensitivity'.",
+        )
         self.gs_beat_min_interval_slider = FloatSlider(
-            "Beat min interval", 30.0, 1000.0, gs.beat_min_interval_ms, decimals=0, suffix=" ms"
+            "Beat min interval", 30.0, 1000.0, gs.beat_min_interval_ms, decimals=0, suffix=" ms",
+            tooltip="Minimum time between two triggered beats - stops one sustained hit from "
+            "re-switching the active group many times in quick succession.",
         )
 
         gs_peak_detect_row = QHBoxLayout()
@@ -486,19 +585,32 @@ class BandModeTab(QWidget):
         self.gs_peak_low_spin.setRange(20, 20000)
         self.gs_peak_low_spin.setSuffix(" Hz")
         self.gs_peak_low_spin.setValue(int(gs.peak_detect_low_hz))
+        self.gs_peak_low_spin.setToolTip(
+            "Which frequencies feed the 'intensity_peak' detector - broaden this (e.g. to the whole "
+            "audible range) to react to any sudden loud moment, not just bass. Only used when Speed "
+            "source is 'intensity_peak'."
+        )
         gs_peak_detect_row.addWidget(self.gs_peak_low_spin)
         gs_peak_detect_row.addWidget(QLabel("-"))
         self.gs_peak_high_spin = QSpinBox()
         self.gs_peak_high_spin.setRange(20, 20000)
         self.gs_peak_high_spin.setSuffix(" Hz")
         self.gs_peak_high_spin.setValue(int(gs.peak_detect_high_hz))
+        self.gs_peak_high_spin.setToolTip(self.gs_peak_low_spin.toolTip())
         gs_peak_detect_row.addWidget(self.gs_peak_high_spin)
         gs_peak_detect_row.addStretch(1)
         gs_speed_col.addLayout(gs_peak_detect_row)
 
-        self.gs_peak_sensitivity_slider = FloatSlider("Peak sensitivity", 1.05, 4.0, gs.peak_sensitivity, decimals=2)
+        self.gs_peak_sensitivity_slider = FloatSlider(
+            "Peak sensitivity", 1.05, 4.0, gs.peak_sensitivity, decimals=2,
+            tooltip="Same threshold logic as Beat sensitivity above, just applied to the "
+            "intensity-peak detector: LOWER = more sensitive/more triggers, HIGHER = fewer, only the "
+            "most obvious loudness spikes.",
+        )
         self.gs_peak_min_interval_slider = FloatSlider(
-            "Peak min interval", 30.0, 1000.0, gs.peak_min_interval_ms, decimals=0, suffix=" ms"
+            "Peak min interval", 30.0, 1000.0, gs.peak_min_interval_ms, decimals=0, suffix=" ms",
+            tooltip="Minimum time between two triggered peaks - stops one loud passage from "
+            "re-switching the active group many times in quick succession.",
         )
         for w in (
             self.gs_beat_sensitivity_slider,
@@ -511,7 +623,13 @@ class BandModeTab(QWidget):
         gs_speed_col.addStretch(1)
 
         # -- right column: intensity/color appearance --------------------------------
-        self.gs_intensity_slider = FloatSlider("Intensity (brightness boost)", 0.0, 8.0, gs.intensity, decimals=2)
+        self.gs_intensity_slider = FloatSlider(
+            "Intensity (brightness boost)", 0.0, 8.0, gs.intensity, decimals=2,
+            tooltip="A brightness BOOST multiplier applied to the active group's lamps, on top of "
+            "whatever the active mode already computed - never an independent/fixed brightness. A lamp "
+            "the active mode has dimmed to black (e.g. a Beat Sync dark pulse) stays black regardless "
+            "of this value.",
+        )
         self.gs_intensity_slider.valueChanged.connect(self._on_group_switch_changed)
         gs_appearance_col.addWidget(self.gs_intensity_slider)
         gs_intensity_label = QLabel(
@@ -526,6 +644,11 @@ class BandModeTab(QWidget):
         self.gs_color_mode_combo = QComboBox()
         self.gs_color_mode_combo.addItems(["custom", "complementary", "hue_shift"])
         self.gs_color_mode_combo.setCurrentText(gs.color_mode)
+        self.gs_color_mode_combo.setToolTip(
+            "custom: one fixed hue/saturation shown on whichever group is active. complementary: always "
+            "the opposite hue (+180 deg) of that group's own current color. hue_shift: each group gets a "
+            "progressively different hue, so which color shows depends on which group is active."
+        )
         self.gs_color_mode_combo.currentTextChanged.connect(self._on_group_switch_changed)
         gs_color_mode_row.addWidget(self.gs_color_mode_combo)
         gs_color_mode_row.addStretch(1)
@@ -540,9 +663,18 @@ class BandModeTab(QWidget):
         gs_appearance_col.addWidget(gs_color_mode_label)
 
         self.gs_hue_slider = HueSlider("Custom hue", gs.custom_hue_deg)
-        self.gs_sat_slider = FloatSlider("Custom saturation", 0.0, 1.0, gs.custom_saturation)
+        self.gs_hue_slider.setToolTip(
+            "Used by 'custom' (the fixed color shown on the active group) and as the starting hue for "
+            "'hue_shift'."
+        )
+        self.gs_sat_slider = FloatSlider(
+            "Custom saturation", 0.0, 1.0, gs.custom_saturation,
+            tooltip="Saturation used by the 'custom' color mode only.",
+        )
         self.gs_hue_shift_slider = FloatSlider(
-            "Hue shift step (for 'hue_shift')", 1.0, 180.0, gs.hue_shift_step_deg, decimals=1, suffix=" deg"
+            "Hue shift step (for 'hue_shift')", 1.0, 180.0, gs.hue_shift_step_deg, decimals=1, suffix=" deg",
+            tooltip="Only used by the 'hue_shift' color mode - how far the hue advances from one group "
+            "to the next, starting from Custom hue above.",
         )
         for w in (self.gs_hue_slider, self.gs_sat_slider, self.gs_hue_shift_slider):
             w.valueChanged.connect(self._on_group_switch_changed)
