@@ -263,10 +263,16 @@ class BeatSyncModeConfig:
     # flashing immediately - a tension-and-release, strobe-like accent.
     # Real-time detection can only react to a beat as it happens (it can't
     # anticipate one), so the pause always happens right after the trigger
-    # and the actual color flash is delayed until the pause ends.
+    # and the actual color flash is delayed until the pause ends. Mirrors
+    # the white pulse controls below (enabled toggle + its own independent
+    # attack/release), applied as a multiplicative dip on top of whatever
+    # the normal flash/sustain brightness envelope is already doing.
+    dark_pulse_enabled: bool = True
     dark_pulse_probability: float = 0.0  # 0..1: chance a given beat gets a pause first
     dark_pulse_duration_ms: float = 70.0  # how long the pause lasts
     dark_pulse_depth: float = 1.0  # 0..1: how dark (1.0 = fully black)
+    dark_pulse_attack_ms: float = 15.0  # how fast brightness snaps down into the pause
+    dark_pulse_release_ms: float = 150.0  # how fast it eases back out once the pause ends
 
     # "White pulses": on a random subset of beats, briefly push saturation
     # toward one extreme, right in sync with that beat's flash - e.g. a
@@ -306,9 +312,12 @@ class BeatSyncModeConfig:
             hue_attack_ms=float(d.get("hue_attack_ms", 40.0)),
             brightness_attack_ms=float(d.get("brightness_attack_ms", 15.0)),
             brightness_release_ms=float(d.get("brightness_release_ms", 350.0)),
+            dark_pulse_enabled=bool(d.get("dark_pulse_enabled", True)),
             dark_pulse_probability=float(d.get("dark_pulse_probability", 0.0)),
             dark_pulse_duration_ms=float(d.get("dark_pulse_duration_ms", 70.0)),
             dark_pulse_depth=float(d.get("dark_pulse_depth", 1.0)),
+            dark_pulse_attack_ms=float(d.get("dark_pulse_attack_ms", 15.0)),
+            dark_pulse_release_ms=float(d.get("dark_pulse_release_ms", 150.0)),
             white_pulse_enabled=bool(d.get("white_pulse_enabled", False)),
             white_pulse_invert=bool(d.get("white_pulse_invert", False)),
             white_pulse_probability=float(d.get("white_pulse_probability", 0.3)),

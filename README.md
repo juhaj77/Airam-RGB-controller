@@ -314,14 +314,17 @@ is; `hue snap speed` / `brightness attack` / `brightness decay` tune how sharp v
 smooth the flash feels. Per-lamp phase offset (8-Band & Per-Lamp tab) still works here
 too - stagger it across lamps for a chase/wave effect on every beat.
 
-**Dark pulses**: `dark_pulse_probability` (0..1) is the chance that a given beat first
-dips toward black for `dark_pulse_duration_ms` (how dark, via `dark_pulse_depth`)
-*before* flashing to its new color, instead of flashing immediately - a rhythm-synced
-pause/strobe accent layered on top of the hue and brightness behavior above. Since this
-is a real-time reactive system, it can only react to a beat as it happens (it can't
-anticipate a future one), so the pause always starts right on the trigger and the
-actual color flash is simply delayed until the pause ends - not a pause *before* the
-hit, but a hesitation *right on* the hit before committing to the flash.
+**Dark pulses**: toggled via `dark_pulse_enabled` (on by default), `dark_pulse_probability`
+(0..1) is the chance that a given beat first dips toward black for `dark_pulse_duration_ms`
+(how dark, via `dark_pulse_depth`) *before* flashing to its new color, instead of flashing
+immediately - a rhythm-synced pause/strobe accent layered on top of the hue and brightness
+behavior above, with its own `dark_pulse_attack_ms`/`release_ms` controlling how sharply it
+cuts into the pause and eases back out of it (independent of the general `brightness_attack_ms`/
+`release_ms` used for the normal flash/decay). Since this is a real-time reactive system, it
+can only react to a beat as it happens (it can't anticipate a future one), so the pause always
+starts right on the trigger and the actual color flash is simply delayed until the pause ends
+- not a pause *before* the hit, but a hesitation *right on* the hit before committing to the
+flash.
 
 **White pulses**: independent of dark pulses, `white_pulse_probability` (0..1, off by
 default - toggle `white_pulse_enabled`) is the chance a given beat's flash *also* gets a

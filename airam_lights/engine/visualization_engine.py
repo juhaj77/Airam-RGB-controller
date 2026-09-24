@@ -118,9 +118,21 @@ class VisualizationEngine:
         self._beat_hue_cursor = self._beat_target_hue
         self._hue_smoother_beat = HueSmoother(bs.hue_attack_ms, initial=self._beat_target_hue)
         self._smoother_beat_value = AttackReleaseSmoother(bs.brightness_attack_ms, bs.brightness_release_ms)
-        self._smoother_beat_saturation = AttackReleaseSmoother(
-            bs.white_pulse_attack_ms, bs.white_pulse_release_ms, initial=bs.saturation
-        )
+        # Both pulse smoothers track a 0..1 "how deep into the pulse are we"
+        # fraction, not the underlying brightness/saturation value directly -
+        # entering a pulse is always a rise toward 1 and leaving it always a
+        # fall back toward 0, regardless of which way the underlying value
+        # itself happens to be moving, so each pulse's attack_ms/release_ms
+        # map onto attack/release exactly the way their names suggest.
+        # (An earlier version fed white_pulse_attack_ms/release_ms straight
+        # into a smoother tracking saturation itself - that smoother picks
+        # attack vs. release based on whether the target is numerically
+        # rising or falling, which for the default, non-inverted pulse
+        # (desaturating DOWN toward white) is backwards: release_ms ended up
+        # controlling the snap INTO the pulse, attack_ms the recovery OUT of
+        # it - the opposite of what the labels and tooltips promise.)
+        self._smoother_beat_dark = AttackReleaseSmoother(bs.dark_pulse_attack_ms, bs.dark_pulse_release_ms)
+        self._smoother_beat_white = AttackReleaseSmoother(bs.white_pulse_attack_ms, bs.white_pulse_release_ms)
         self._beat_dark_until: Optional[float] = None  # set while a dark-pulse pause is pending/active
         self._beat_white_pulse_until: Optional[float] = None  # set while a white-pulse hold is pending/active
         self.last_beat_time: Optional[float] = None
@@ -199,8 +211,10 @@ class VisualizationEngine:
         self._hue_smoother_beat.time_constant_ms = bs.hue_attack_ms
         self._smoother_beat_value.attack_ms = bs.brightness_attack_ms
         self._smoother_beat_value.release_ms = bs.brightness_release_ms
-        self._smoother_beat_saturation.attack_ms = bs.white_pulse_attack_ms
-        self._smoother_beat_saturation.release_ms = bs.white_pulse_release_ms
+        self._smoother_beat_dark.attack_ms = bs.dark_pulse_attack_ms
+        self._smoother_beat_dark.release_ms = bs.dark_pulse_release_ms
+        self._smoother_beat_white.attack_ms = bs.white_pulse_attack_ms
+        self._smoother_beat_white.release_ms = bs.white_pulse_release_ms
 
         pf = self.config.color_mapping.peak_flash
         self._peak_detector.sensitivity = pf.sensitivity
@@ -438,7 +452,8 @@ class VisualizationEngine:
         flash_now = False
         if is_beat:
             if (
-                cfg.dark_pulse_probability > 0.0
+                cfg.dark_pulse_enabled
+                and cfg.dark_pulse_probability > 0.0
                 and cfg.dark_pulse_duration_ms > 0.0
                 and random.random() < cfg.dark_pulse_probability
             ):
@@ -470,22 +485,24 @@ class VisualizationEngine:
         in_white_pulse = self._beat_white_pulse_until is not None
         hue_s = self._hue_smoother_beat.update(self._beat_target_hue, dt)
 
-        if in_dark_pulse:
-            target_value = cfg.sustain_brightness * (1.0 - cfg.dark_pulse_depth)
-        elif flash_now:
-            target_value = cfg.flash_brightness
-        else:
-            target_value = cfg.sustain_brightness
+        target_value = cfg.flash_brightness if flash_now else cfg.sustain_brightness
         value_s = self._smoother_beat_value.update(target_value, dt)
+        # Dark pulse is layered on top as an independent multiplicative dip,
+        # smoothed on its own attack/release - not folded into target_value
+        # above, since that would tie its timing to brightness_attack_ms/
+        # release_ms instead of its own dark_pulse_attack_ms/release_ms.
+        dark_amount = self._smoother_beat_dark.update(1.0 if in_dark_pulse else 0.0, dt)
+        if dark_amount > 0.0:
+            value_s = value_s * (1.0 - dark_amount * cfg.dark_pulse_depth)
 
-        if in_white_pulse:
-            # depth=1.0 reaches the extreme exactly; depth=0.0 is a no-op -
-            # lerp() from the base saturation toward whichever extreme.
-            extreme = 1.0 if cfg.white_pulse_invert else 0.0
-            target_saturation = lerp(cfg.saturation, extreme, cfg.white_pulse_depth)
-        else:
-            target_saturation = cfg.saturation
-        saturation_s = self._smoother_beat_saturation.update(target_saturation, dt)
+        # depth=1.0 reaches the extreme exactly; depth=0.0 is a no-op - lerp()
+        # from the base saturation toward whichever extreme, by the smoothed
+        # 0..1 pulse amount (see the comment on _smoother_beat_white above
+        # for why this is smoothed as an amount rather than as the
+        # saturation value itself).
+        white_amount = self._smoother_beat_white.update(1.0 if in_white_pulse else 0.0, dt)
+        extreme = 1.0 if cfg.white_pulse_invert else 0.0
+        saturation_s = lerp(cfg.saturation, extreme, white_amount * cfg.white_pulse_depth)
 
         self.latest_band3_levels = {
             "beat_energy": raw_energy,

@@ -250,6 +250,15 @@ class ColorMappingTab(QWidget):
         beat_dark_note.setWordWrap(True)
         beat_layout.addWidget(beat_dark_note)
 
+        self.beat_dark_enabled_checkbox = QCheckBox("Enabled")
+        self.beat_dark_enabled_checkbox.setChecked(bs.dark_pulse_enabled)
+        self.beat_dark_enabled_checkbox.setToolTip(
+            "Turns the dark-pulse accent on or off - leave unchecked if you never want this effect "
+            "(white pulses below are unaffected either way)."
+        )
+        self.beat_dark_enabled_checkbox.toggled.connect(self._on_beat_changed)
+        beat_layout.addWidget(self.beat_dark_enabled_checkbox)
+
         self.beat_dark_prob_slider = FloatSlider(
             "Dark pulse probability", 0.0, 1.0, bs.dark_pulse_probability, decimals=2,
             tooltip="Chance a given beat gets this dark dip instead of flashing immediately - "
@@ -264,7 +273,23 @@ class ColorMappingTab(QWidget):
             tooltip="How far toward black the dip goes - 1.0 = fully black for the duration above, "
             "lower = a partial dim instead of a total blackout.",
         )
-        for w in (self.beat_dark_prob_slider, self.beat_dark_duration_slider, self.beat_dark_depth_slider):
+        self.beat_dark_attack_slider = FloatSlider(
+            "Dark pulse attack", 1.0, 300.0, bs.dark_pulse_attack_ms, decimals=0, suffix=" ms",
+            tooltip="How fast brightness snaps down into the dip when the pulse starts - low = an "
+            "instant cut to black, right on the beat.",
+        )
+        self.beat_dark_release_slider = FloatSlider(
+            "Dark pulse release", 10.0, 1000.0, bs.dark_pulse_release_ms, decimals=0, suffix=" ms",
+            tooltip="How slowly brightness eases back out of the dip once the pulse's duration ends - "
+            "higher means a longer visible fade back before/into the delayed flash.",
+        )
+        for w in (
+            self.beat_dark_prob_slider,
+            self.beat_dark_duration_slider,
+            self.beat_dark_depth_slider,
+            self.beat_dark_attack_slider,
+            self.beat_dark_release_slider,
+        ):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
 
@@ -628,9 +653,12 @@ class ColorMappingTab(QWidget):
         bs.hue_attack_ms = self.beat_hue_attack_slider.value()
         bs.brightness_attack_ms = self.beat_bright_attack_slider.value()
         bs.brightness_release_ms = self.beat_bright_release_slider.value()
+        bs.dark_pulse_enabled = self.beat_dark_enabled_checkbox.isChecked()
         bs.dark_pulse_probability = self.beat_dark_prob_slider.value()
         bs.dark_pulse_duration_ms = self.beat_dark_duration_slider.value()
         bs.dark_pulse_depth = self.beat_dark_depth_slider.value()
+        bs.dark_pulse_attack_ms = self.beat_dark_attack_slider.value()
+        bs.dark_pulse_release_ms = self.beat_dark_release_slider.value()
         bs.white_pulse_enabled = self.beat_white_pulse_enabled_checkbox.isChecked()
         bs.white_pulse_invert = self.beat_white_pulse_invert_checkbox.isChecked()
         bs.white_pulse_probability = self.beat_white_pulse_prob_slider.value()
