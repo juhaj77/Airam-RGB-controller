@@ -2,21 +2,33 @@
 
 A Windows desktop application that turns **Airam SmartHome Smart PAR16 RGB GU10**
 Wi-Fi spotlights into a real-time, fully configurable music visualizer - controlled
-entirely over your **local network**, with no cloud dependency at runtime, no Android
-phone, and no microphone required. Works with any number of lamps, from one to as
-many as your Wi-Fi network and Tuya account can handle - the author's own setup runs
-8, but nothing in the app assumes that specific number anywhere.
+entirely over your **local network**, with no cloud dependency at runtime and no
+Android phone required. Works with any number of lamps, from one to as many as your
+Wi-Fi network and Tuya account can handle - the author's own setup runs 8, but nothing
+in the app assumes that specific number anywhere. Audio normally comes from WASAPI
+loopback (no microphone needed), but a real microphone can be selected instead if you
+want to test how the lights react to actual room/ambient sound.
 
 It replaces the Airam SmartHome app's built-in "Music Sync" (which is limited to one
 bulb at a time and changes colors abruptly) with your own local FFT-based analysis,
 smooth attack/release color interpolation, and simultaneous, synchronized control of
 every lamp you own.
 
-> **If you only try one mode, try Beat Sync.** Of the six color-mapping modes, it's
-> the one that consistently feels the most visually alive in practice - a percussive
-> flash-and-decay on every beat instead of the continuous, sometimes-muted blending the
-> other modes do. See [section 5](#5-running-the-full-application) for the full writeup,
-> or jump straight to [Beat Sync mode](#beat-sync-mode).
+> **Beat Sync is the most interesting mode - and the default.** Of all the
+> color-mapping modes, it's the one that consistently feels the most visually alive in
+> practice - a percussive flash-and-decay on every beat, optionally with **dark pulses**
+> (a rhythm-synced pause before the flash) and **white pulses** (a hi-hat/cymbal-style
+> saturation accent), instead of the continuous, sometimes-muted blending the other
+> modes do. It also ships paired with the **Chase / Rotating Light overlay** enabled
+> by default, set to **complementary** color - a highlight that rotates through your
+> chase-ordered lamps always showing the opposite hue of whatever Beat Sync just put
+> there, so the combination stays visually varied instead of settling into one static
+> look. See [section 5](#5-running-the-full-application) for the full writeup, or jump
+> straight to [Beat Sync mode](#beat-sync-mode) or the
+> [Chase overlay](#chase--rotating-light-overlay). The Chase highlight's **width**
+> should scale with how many lamps are in the chase - see that section for a starting
+> formula; the shipped default (1.5) assumes a modest handful of lamps and may want
+> adjusting for very small or very large setups.
 
 > **Read `DEVICE_NOTES.md` first.** It separates *confirmed facts*, *assumptions*, and
 > *things you still need to test* about your specific bulbs. This README assumes you
@@ -24,15 +36,22 @@ every lamp you own.
 
 **At a glance:**
 
-- **100% local control** - WASAPI loopback audio + local Tuya LAN protocol, no cloud
-  round-trip and no companion app needed once set up.
+- **100% local control** - WASAPI loopback audio (or a real microphone, if you want
+  to test with room sound) + local Tuya LAN protocol, no cloud round-trip and no
+  companion app needed once set up.
 - **Six color-mapping modes**: RGB Frequency, HSV Music, 8-Band Spectrum, Beat Sync
-  (see above), Peak Flash, and Beat Sync White - plus a Custom mode for arbitrary
-  frequency ranges.
+  (see above - now with optional **dark pulses** and **white pulses**), Peak Flash, and
+  Beat Sync White - plus a Custom mode for arbitrary frequency ranges.
 - **Per-lamp control**: band assignment, phase offset, and independent
   brightness/saturation/hue/sensitivity multipliers for every lamp.
 - **Chase / Rotating Light overlay** - a moving highlight (reversible, adjustable
-  width/speed/falloff curve, optionally beat-synced) layered on top of any mode.
+  width/speed/falloff curve, optionally beat- or peak-synced) layered on top of any
+  mode - **on by default**, paired with Beat Sync (see above).
+- **Group Switch overlay** - a discrete alternative to Chase: lamps are grouped
+  (independently of Chase's own grouping) and exactly one group is fully "active" at a
+  time with a hard, instant switch instead of a gradient - useful when you want a clean
+  on/off alternation between lamp groups rather than a traveling highlight. Can run at
+  the same time as Chase.
 - **Ambient Scenes** - synchronized, PC-driven looping animations (color cycle,
   breathing, color-temperature breathing) that solve multi-lamp sync properly instead
   of power-cycling smart plugs.
@@ -222,10 +241,18 @@ python main.py
 ```
 
 ### Visualizer tab
-Pick your WASAPI loopback device (defaults to your current default playback device -
-no microphone involved), watch the level meter and spectrum to confirm audio capture
-works, choose a mode, tweak sensitivity/brightness/saturation/attack/release, and press
-**Start Music Visualization**.
+Pick your audio **Source**: WASAPI loopback (default - your current default playback
+device, no microphone involved) or **Microphone** (a real recording device, for testing
+how the lights react to actual room/ambient sound - has its own sensitivity/gain
+control, since mics are usually much quieter than a loopback tap). Watch the level
+meter and spectrum to confirm audio capture works, choose a mode, tweak
+sensitivity/brightness/saturation/attack/release, and press **Start Music
+Visualization**.
+
+> **Heads up:** the "Sensitivity" quick control here is shared across RGB Frequency,
+> Custom, *and* HSV Music mode - dragging it down affects all three at once. If those
+> modes suddenly look dim/black, check this slider before assuming something's wrong;
+> it defaults to 1.0.
 
 ### Devices & Setup tab
 Add lamps manually (or via **Scan Network** for IP/ID, then fill in the key), test
@@ -277,6 +304,16 @@ anticipate a future one), so the pause always starts right on the trigger and th
 actual color flash is simply delayed until the pause ends - not a pause *before* the
 hit, but a hesitation *right on* the hit before committing to the flash.
 
+**White pulses**: independent of dark pulses, `white_pulse_probability` (0..1, off by
+default - toggle `white_pulse_enabled`) is the chance a given beat's flash *also* gets a
+brief saturation accent - snapping toward white (or, with `white_pulse_invert`, toward
+fully vivid instead - useful if your base `saturation` is already fairly pastel) for
+`white_pulse_duration_ms`, with its own `white_pulse_attack_ms`/`release_ms` controlling
+how sharply it snaps in and eases back out. Dark and white pulses each roll their own
+probability independently on every beat - both, either, or neither can happen on any
+given hit, so with both enabled at non-trivial probabilities you'll occasionally see
+them coincide; that's expected rather than a bug.
+
 #### Peak Flash mode
 A softer, more continuous cousin of Beat Sync. Instead of a fixed bass-only trigger and
 a hue that only changes on a beat, Peak Flash:
@@ -319,42 +356,52 @@ min interval, flash/sustain brightness, dark pulses) works exactly like Beat Syn
 > see `DEVICE_NOTES.md`. Test it via the manual app's White Balance tab first.
 
 ### 8-Band & Per-Lamp tab
-Edit the 8 frequency bands (defaults to the 20 Hz-12 kHz split from the spec, one band
-per lamp), 8-band appearance (base hue, hue step for a rainbow look, saturation,
-brightness range), and the **per-lamp effects table**: band assignment, temporal/phase
-offset (for wave/chase effects), brightness/saturation/hue/sensitivity multipliers, and
-**chase order** per lamp - this is what turns a set of identical bulbs into a
-coordinated light installation instead of identical copies of the same signal, and it
-applies in every mode, not just 8-band.
+Split into three inner sub-tabs: **Bands & Spectrum**, **Per-Lamp Effects**, and
+**Chase Overlay** (a fourth, **Group Switch**, holds that overlay's settings - see
+below). Bands & Spectrum edits the 8 frequency bands (defaults to the 20 Hz-12 kHz
+split from the spec, one band per lamp) and 8-band appearance (base hue, hue step for a
+rainbow look, saturation, brightness range). Per-Lamp Effects has the **per-lamp
+effects table**: band assignment, temporal/phase offset (for wave/chase effects),
+brightness/saturation/hue/sensitivity multipliers, **chase order**, and **effect group**
+(for Group Switch, see below) per lamp - this is what turns a set of identical bulbs
+into a coordinated light installation instead of identical copies of the same signal,
+and it applies in every mode, not just 8-band.
 
 #### Chase / Rotating Light overlay
 An overlay effect layered on top of **whichever color mode is active** (RGB, HSV,
-8-Band, Beat Sync, Peak Flash, Custom - all of them): give a lamp a **chase order**
-(0, 1, 2, ...) in the per-lamp effects table to include it in the rotation, then a
-moving highlight travels through them in that order, creating a spinning/chasing light
-effect on top of whatever colors the active mode is already producing.
+8-Band, Beat Sync, Peak Flash, Custom - all of them), **enabled by default**: give a
+lamp a **chase order** (0, 1, 2, ...) in the per-lamp effects table to include it in the
+rotation, then a moving highlight travels through them in that order, creating a
+spinning/chasing light effect on top of whatever colors the active mode is already
+producing.
 
-- **Speed**: either a constant number of **full rotations per second** (e.g. 0.5 = one
-  complete lap around all the chase-ordered lamps every 2 seconds, regardless of how
-  many lamps are in the chase), or **synced to the detected beat** - `beat_multiplier`
-  sets how many lamp-steps happen per beat (1 = one step per beat, 2 = twice as fast,
-  0.5 = one step every two beats) using the chase's own independent beat detector, so it
-  speeds up/slows down with the music's tempo without needing any music-theory knowledge.
+- **Speed source**: `off` for a constant number of **full rotations per second** (e.g.
+  0.5 = one complete lap around all the chase-ordered lamps every 2 seconds, regardless
+  of how many lamps are in the chase); `beat` or `intensity_peak` to instead sit still
+  and only advance `beat_multiplier` lamp-steps the instant a beat (bass-band, via the
+  chase's own independent detector) or a broadband loudness peak is detected - genuinely
+  event-driven, not a tempo estimate, so it never drifts on its own between hits.
 - **Highlight width**: how many lamp-positions the glow spans (soft falloff). Lower
   (e.g. 0.5-0.8) gives a crisp "single dot traveling" look; higher blurs it across more
-  lamps at once.
+  lamps at once. **Scale this with your lamp count**: as a starting point, roughly a
+  third of the number of lamps in the chase tends to look smooth without lighting every
+  lamp at once (the shipped default, 1.5, assumes a modest handful of lamps - a chase of
+  12+ lamps likely wants a noticeably wider highlight, a chase of 2-3 wants it narrower).
 - **Intensity**: a brightness *boost multiplier* applied on top of whatever brightness
   the active mode already computed for that lamp - it is never an independent/fixed
   brightness. This matters: a lamp the active mode has deliberately dimmed to black
   (e.g. a Beat Sync dark pulse) stays black no matter how high the intensity or how wide
   the highlight is, since boosting zero brightness is still zero. If the chase feels too
   subtle, raise this (default 3x) rather than expecting it to override a dark moment.
-- **Color**: either a fixed custom hue/saturation, or **complementary** - the chase
-  highlight's hue becomes the opposite (+180°) of whatever hue that lamp is already
-  showing from the active mode. For the clearest, most obviously visible effect, use
-  **custom** with a hue that's very different from your usual palette (e.g. if your
-  mode tends toward blues/greens, try an orange/red custom hue around 20-40°) combined
-  with a narrow width.
+- **Color**: **complementary** (the default, paired with Beat Sync) makes the chase
+  highlight's hue the opposite (+180°) of whatever hue that lamp is already showing from
+  the active mode - stays visually varied no matter what colors the base mode is
+  currently producing. **hue_shift** instead gives each chase position a progressively
+  different, fixed hue (a rainbow trail effect, stepped by `hue_shift_step_deg` from
+  `custom_hue_deg`). **custom** uses one fixed hue/saturation for the whole highlight -
+  for the clearest, most obviously visible effect, pick a hue very different from your
+  usual palette (e.g. if your mode tends toward blues/greens, try an orange/red hue
+  around 20-40°) combined with a narrow width.
 - **Chase dwell x** (per-lamp effects table, one column per lamp): how long the
   highlight lingers at *this lamp's* chase position relative to the others - 1.0 is
   the default/uniform speed. Lower it for a position that has several physical lamps
@@ -362,6 +409,19 @@ effect on top of whatever colors the active mode is already producing.
   like it dwells there noticeably longer than at single-lamp positions - which is a
   real perceptual effect (more lamps lit at once reads as "lingering" even though the
   underlying timing is uniform without this), not just something to live with.
+
+#### Group Switch overlay
+A **discrete alternative** to the Chase overlay above, in its own sub-tab: instead of a
+highlight that gradually blends across neighboring lamps, lamps are grouped by
+**effect group** (0, 1, 2, ... - set in the per-lamp effects table, a separate grouping
+from Chase's own **chase order**, so a lamp can be in either, both, or neither), and
+exactly **one group is fully active at a time** with a hard, instant switch - no
+gradient, no partial blend on neighboring groups. Same speed-source model as Chase
+(`off` / `beat` / `intensity_peak`, its own independent detector) and the same
+custom/complementary/hue_shift color options, but deliberately without a width or
+falloff-curve concept, since there's nothing to blend. Can run at the same time as
+Chase - Chase applies first, then Group Switch's discrete switch applies on top of
+whatever color Chase already produced for that lamp.
 
 ### Diagnostics tab
 Audio callback rate, FFT/analysis rate, visual update rate, per-lamp online state /
@@ -589,10 +649,10 @@ for between the music-analysis engine and the lamp-control layer.
   directly as a fallback - the app's Devices tab lets you enter everything manually
   regardless.
 - Every non-UI module (`audio`, `dsp`, `color`, `lamps`, `config`, `engine`, `effects`)
-  is covered by an automated test suite (`pytest tests/`, currently 58 tests: DSP,
-  smoothing, color mapping, beat detection, Chase/Ambient overlays including reverse
-  direction, and full config-persistence round-trips) plus offscreen Qt smoke tests
-  that construct the real UI windows end-to-end.
+  is covered by an automated test suite (`pytest tests/`, currently 82 tests: DSP,
+  smoothing, color mapping, beat detection, Chase/Group Switch/Ambient overlays
+  including reverse direction, and full config-persistence round-trips) plus offscreen
+  Qt smoke tests that construct the real UI windows end-to-end.
 - The Tuya cloud account-linking step (one-time, during setup) can be finicky
   depending on how your Airam SmartHome account is set up - `DEVICE_NOTES.md` documents
   the exact snags hit during development (the "use the correct app" QR block, the

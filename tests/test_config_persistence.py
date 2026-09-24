@@ -56,11 +56,9 @@ def _build_fully_populated_config() -> AppConfig:
         min_energy=0.13, hue_mode="step", hue_step_deg=138.5, min_hue_jump_deg=61.0,
         saturation=0.91, flash_brightness=0.92, sustain_brightness=0.26, hue_attack_ms=41.0,
         brightness_attack_ms=16.0, brightness_release_ms=351.0, dark_pulse_probability=0.31,
-        dark_pulse_duration_ms=71.0, dark_pulse_depth=0.81,
-        dark_pulse_detect_low_hz=42.0, dark_pulse_detect_high_hz=6001.0, white_pulse_enabled=True,
+        dark_pulse_duration_ms=71.0, dark_pulse_depth=0.81, white_pulse_enabled=True,
         white_pulse_invert=True, white_pulse_probability=0.41, white_pulse_duration_ms=91.0,
         white_pulse_depth=0.71, white_pulse_attack_ms=17.0, white_pulse_release_ms=161.0,
-        white_pulse_detect_low_hz=6101.0, white_pulse_detect_high_hz=19001.0,
     )
     peak_flash = PeakFlashModeConfig(
         detect_low_hz=21.0, detect_high_hz=16001.0, sensitivity=1.31, min_interval_ms=61.0,

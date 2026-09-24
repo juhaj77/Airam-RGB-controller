@@ -267,12 +267,6 @@ class BeatSyncModeConfig:
     dark_pulse_probability: float = 0.0  # 0..1: chance a given beat gets a pause first
     dark_pulse_duration_ms: float = 70.0  # how long the pause lasts
     dark_pulse_depth: float = 1.0  # 0..1: how dark (1.0 = fully black)
-    # Which frequency content a beat needs to be dominated by to be eligible
-    # for a dark pulse at all (see white_pulse_detect_* below) - default
-    # tuned for kick/bass-heavy hits, same idea as the main detect_low_hz/
-    # detect_high_hz above but independently adjustable.
-    dark_pulse_detect_low_hz: float = 40.0
-    dark_pulse_detect_high_hz: float = 6000.0
 
     # "White pulses": on a random subset of beats, briefly push saturation
     # toward one extreme, right in sync with that beat's flash - e.g. a
@@ -280,7 +274,10 @@ class BeatSyncModeConfig:
     # `white_pulse_invert` flips which extreme: off (default) = desaturate
     # toward white; on = saturate toward a fully vivid color instead (handy
     # if the base `saturation` above is already fairly pastel/muted).
-    # Independent of dark pulses above - both can be enabled at once.
+    # Independent of dark pulses above - each rolls its own probability on
+    # every beat (an earlier version tried to make them mutually exclusive
+    # via separate detection bands, but that wasn't reliable - see
+    # VisualizationEngine._tick_beat_sync_mode's docstring for why).
     white_pulse_enabled: bool = False
     white_pulse_invert: bool = False
     white_pulse_probability: float = 0.3  # 0..1: chance a given beat's flash also gets this pulse
@@ -288,15 +285,6 @@ class BeatSyncModeConfig:
     white_pulse_depth: float = 1.0  # 0..1: how far toward the extreme (1.0 = fully white/fully saturated)
     white_pulse_attack_ms: float = 15.0  # how fast saturation snaps toward the extreme
     white_pulse_release_ms: float = 150.0  # how fast it settles back to the base saturation afterward
-    # Which frequency content a beat needs to be dominated by to be eligible
-    # for a white pulse - default tuned for hi-hat/cymbal-heavy hits. Dark
-    # and white pulses are mutually exclusive PER BEAT: whichever band (this
-    # one or dark_pulse_detect_* above) has more energy at that instant is
-    # the only one eligible to roll its own probability - as long as the two
-    # bands don't overlap, this keeps them from constantly landing on the
-    # exact same hit even though both roll independent dice.
-    white_pulse_detect_low_hz: float = 6100.0
-    white_pulse_detect_high_hz: float = 20000.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -321,8 +309,6 @@ class BeatSyncModeConfig:
             dark_pulse_probability=float(d.get("dark_pulse_probability", 0.0)),
             dark_pulse_duration_ms=float(d.get("dark_pulse_duration_ms", 70.0)),
             dark_pulse_depth=float(d.get("dark_pulse_depth", 1.0)),
-            dark_pulse_detect_low_hz=float(d.get("dark_pulse_detect_low_hz", 40.0)),
-            dark_pulse_detect_high_hz=float(d.get("dark_pulse_detect_high_hz", 6000.0)),
             white_pulse_enabled=bool(d.get("white_pulse_enabled", False)),
             white_pulse_invert=bool(d.get("white_pulse_invert", False)),
             white_pulse_probability=float(d.get("white_pulse_probability", 0.3)),
@@ -330,8 +316,6 @@ class BeatSyncModeConfig:
             white_pulse_depth=float(d.get("white_pulse_depth", 1.0)),
             white_pulse_attack_ms=float(d.get("white_pulse_attack_ms", 15.0)),
             white_pulse_release_ms=float(d.get("white_pulse_release_ms", 150.0)),
-            white_pulse_detect_low_hz=float(d.get("white_pulse_detect_low_hz", 6100.0)),
-            white_pulse_detect_high_hz=float(d.get("white_pulse_detect_high_hz", 20000.0)),
         )
 
 
@@ -478,7 +462,10 @@ class BeatSyncWhiteModeConfig:
 
 @dataclass
 class ColorMappingConfig:
-    mode: str = "rgb_freq"  # "rgb_freq" | "hsv_music" | "custom" | "8band_spectrum" | "beat_sync" | "peak_flash" | "beat_sync_white"
+    # "beat_sync" is the default: a percussive, obviously rhythm-locked flash
+    # on every beat reads as far more "alive" in practice than the smoothly
+    # continuous blending the other modes do - see README.md.
+    mode: str = "beat_sync"  # "rgb_freq" | "hsv_music" | "custom" | "8band_spectrum" | "beat_sync" | "peak_flash" | "beat_sync_white"
     rgb: RGBModeConfig = field(default_factory=RGBModeConfig)
     custom: RGBModeConfig = field(default_factory=RGBModeConfig)
     hsv: HSVModeConfig = field(default_factory=HSVModeConfig)
@@ -625,7 +612,13 @@ class ChaseEffectConfig:
     dark pulse) stays black even while the chase highlight passes over it.
     """
 
-    enabled: bool = False
+    # On by default, paired with color_mode="complementary" below - a
+    # rotating complementary-color highlight on top of Beat Sync (also the
+    # default mode) is the combination this app looks best with out of the
+    # box. Only actually visible once lamps have a chase_order assigned
+    # (Per-Lamp Effects tab), so this is harmless on a fresh install with no
+    # lamps configured yet.
+    enabled: bool = True
 
     num_rotators: int = 1  # how many highlights travel the loop at once, evenly spaced
     # (e.g. 2 = two highlights on opposite sides of the loop, both moving together)
@@ -653,7 +646,13 @@ class ChaseEffectConfig:
     peak_min_interval_ms: float = 60.0
     peak_min_energy: float = 0.08
 
-    width: float = 0.7  # how many lamp-positions wide the highlight is (soft falloff) - smaller = crisper single-lamp look
+    # How many lamp-positions wide the highlight is (soft falloff) - smaller
+    # = crisper single-lamp look, larger = a smoother wave touching more
+    # lamps at once. The "right" value scales with how many lamps are in the
+    # chase - as a starting point, roughly a third of the chase's lamp count
+    # tends to look smooth without every lamp being lit at once; tune to
+    # taste (see README.md).
+    width: float = 1.5
     intensity: float = 3.0  # brightness boost multiplier at the highlight's peak (base 0 always stays 0)
     # "linear": weight falls off at a constant rate from the peak - the peak
     # is a single instant, never lingered on, which can feel like the
@@ -663,7 +662,12 @@ class ChaseEffectConfig:
     # its color for longer before smoothly handing off to the background.
     falloff_curve: str = "linear"  # "linear" | "bezier"
 
-    color_mode: str = "custom"  # "custom" | "complementary" | "hue_shift"
+    # "complementary" is the default - the highlight always opposes
+    # whatever hue the active color mode (Beat Sync by default) already put
+    # on that lamp, so it stays visually interesting/varied no matter what
+    # colors the base mode is currently showing, instead of imposing one
+    # fixed hue regardless of context.
+    color_mode: str = "complementary"  # "custom" | "complementary" | "hue_shift"
     custom_hue_deg: float = 280.0
     custom_saturation: float = 1.0
     # Used when color_mode == "hue_shift": each successive chase position

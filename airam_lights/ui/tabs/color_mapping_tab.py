@@ -245,40 +245,15 @@ class ColorMappingTab(QWidget):
 
         beat_dark_note = QLabel(
             "Dark pulses: on a random subset of beats, briefly dip brightness toward black BEFORE "
-            "flashing - a rhythm-synced pause/strobe accent. Eligible only on beats dominated by the "
-            "frequency band below (kick/bass by default) - see the white pulse note further down for "
-            "why, and both pulse types' notes together."
+            "flashing - a rhythm-synced pause/strobe accent, on top of the hue and brightness above."
         )
         beat_dark_note.setWordWrap(True)
         beat_layout.addWidget(beat_dark_note)
 
-        dark_detect_row = QHBoxLayout()
-        dark_detect_row.addWidget(QLabel("Dark pulse detection band:"))
-        self.beat_dark_low_spin = QSpinBox()
-        self.beat_dark_low_spin.setRange(20, 20000)
-        self.beat_dark_low_spin.setSuffix(" Hz")
-        self.beat_dark_low_spin.setValue(int(bs.dark_pulse_detect_low_hz))
-        self.beat_dark_low_spin.setToolTip(
-            "Which frequency content a beat needs to be dominated by to be ELIGIBLE for a dark pulse "
-            "at all - tuned for kick/bass hits by default. At every beat, whichever of this band and "
-            "the white pulse band below is louder is the only one allowed to roll its own probability, "
-            "so kick-heavy hits and hi-hat-heavy hits don't constantly compete for the same accent."
-        )
-        dark_detect_row.addWidget(self.beat_dark_low_spin)
-        dark_detect_row.addWidget(QLabel("-"))
-        self.beat_dark_high_spin = QSpinBox()
-        self.beat_dark_high_spin.setRange(20, 20000)
-        self.beat_dark_high_spin.setSuffix(" Hz")
-        self.beat_dark_high_spin.setValue(int(bs.dark_pulse_detect_high_hz))
-        self.beat_dark_high_spin.setToolTip(self.beat_dark_low_spin.toolTip())
-        dark_detect_row.addWidget(self.beat_dark_high_spin)
-        dark_detect_row.addStretch(1)
-        beat_layout.addLayout(dark_detect_row)
-
         self.beat_dark_prob_slider = FloatSlider(
             "Dark pulse probability", 0.0, 1.0, bs.dark_pulse_probability, decimals=2,
-            tooltip="Chance that a given beat DOMINATED BY THE BAND ABOVE gets this dark dip instead "
-            "of flashing immediately - 0 = never, 1 = every eligible beat.",
+            tooltip="Chance a given beat gets this dark dip instead of flashing immediately - "
+            "0 = never, 1 = every beat.",
         )
         self.beat_dark_duration_slider = FloatSlider(
             "Dark pulse duration", 10.0, 500.0, bs.dark_pulse_duration_ms, decimals=0, suffix=" ms",
@@ -296,11 +271,8 @@ class ColorMappingTab(QWidget):
         beat_white_pulse_note = QLabel(
             "White pulses: on a random subset of beats, briefly push saturation toward one extreme "
             "right as the flash happens - e.g. a hi-hat/cymbal accent snapping to near-white for an "
-            "instant. Eligible only on beats dominated by the frequency band below (hi-hat/cymbal by "
-            "default) - independent of dark pulses above, and mutually exclusive per beat with them "
-            "(see the dark pulse band's tooltip). Note that BOTH pulse types only ever fire on a beat "
-            "detected by the main 'Beat detection band' higher up - widen that band if you want hits "
-            "outside the kick range (e.g. hi-hat-only hits) to be able to trigger a pulse at all."
+            "instant. Independent of dark pulses above - each rolls its own probability on every beat, "
+            "so both, either, or neither can happen on any given hit."
         )
         beat_white_pulse_note.setWordWrap(True)
         beat_layout.addWidget(beat_white_pulse_note)
@@ -326,33 +298,9 @@ class ColorMappingTab(QWidget):
         self.beat_white_pulse_invert_checkbox.toggled.connect(self._on_beat_changed)
         beat_layout.addWidget(self.beat_white_pulse_invert_checkbox)
 
-        white_detect_row = QHBoxLayout()
-        white_detect_row.addWidget(QLabel("White pulse detection band:"))
-        self.beat_white_low_spin = QSpinBox()
-        self.beat_white_low_spin.setRange(20, 20000)
-        self.beat_white_low_spin.setSuffix(" Hz")
-        self.beat_white_low_spin.setValue(int(bs.white_pulse_detect_low_hz))
-        self.beat_white_low_spin.setToolTip(
-            "Which frequency content a beat needs to be dominated by to be ELIGIBLE for a white pulse "
-            "at all - tuned for hi-hat/cymbal hits by default. See the dark pulse detection band's "
-            "tooltip above - whichever of the two bands is louder at a given beat is the only one "
-            "allowed to roll its own probability there."
-        )
-        white_detect_row.addWidget(self.beat_white_low_spin)
-        white_detect_row.addWidget(QLabel("-"))
-        self.beat_white_high_spin = QSpinBox()
-        self.beat_white_high_spin.setRange(20, 20000)
-        self.beat_white_high_spin.setSuffix(" Hz")
-        self.beat_white_high_spin.setValue(int(bs.white_pulse_detect_high_hz))
-        self.beat_white_high_spin.setToolTip(self.beat_white_low_spin.toolTip())
-        white_detect_row.addWidget(self.beat_white_high_spin)
-        white_detect_row.addStretch(1)
-        beat_layout.addLayout(white_detect_row)
-
         self.beat_white_pulse_prob_slider = FloatSlider(
             "White pulse probability", 0.0, 1.0, bs.white_pulse_probability, decimals=2,
-            tooltip="Chance that a given beat DOMINATED BY THE BAND ABOVE gets this saturation pulse "
-            "- 0 = never, 1 = every eligible beat.",
+            tooltip="Chance a given beat gets this saturation pulse - 0 = never, 1 = every beat.",
         )
         self.beat_white_pulse_duration_slider = FloatSlider(
             "White pulse duration", 10.0, 500.0, bs.white_pulse_duration_ms, decimals=0, suffix=" ms",
@@ -386,10 +334,6 @@ class ColorMappingTab(QWidget):
 
         self.beat_low_spin.valueChanged.connect(self._on_beat_changed)
         self.beat_high_spin.valueChanged.connect(self._on_beat_changed)
-        self.beat_dark_low_spin.valueChanged.connect(self._on_beat_changed)
-        self.beat_dark_high_spin.valueChanged.connect(self._on_beat_changed)
-        self.beat_white_low_spin.valueChanged.connect(self._on_beat_changed)
-        self.beat_white_high_spin.valueChanged.connect(self._on_beat_changed)
 
         sub_tabs.addTab(beat_widget, "Beat Sync")
 
@@ -687,8 +631,6 @@ class ColorMappingTab(QWidget):
         bs.dark_pulse_probability = self.beat_dark_prob_slider.value()
         bs.dark_pulse_duration_ms = self.beat_dark_duration_slider.value()
         bs.dark_pulse_depth = self.beat_dark_depth_slider.value()
-        bs.dark_pulse_detect_low_hz = self.beat_dark_low_spin.value()
-        bs.dark_pulse_detect_high_hz = self.beat_dark_high_spin.value()
         bs.white_pulse_enabled = self.beat_white_pulse_enabled_checkbox.isChecked()
         bs.white_pulse_invert = self.beat_white_pulse_invert_checkbox.isChecked()
         bs.white_pulse_probability = self.beat_white_pulse_prob_slider.value()
@@ -696,8 +638,6 @@ class ColorMappingTab(QWidget):
         bs.white_pulse_depth = self.beat_white_pulse_depth_slider.value()
         bs.white_pulse_attack_ms = self.beat_white_pulse_attack_slider.value()
         bs.white_pulse_release_ms = self.beat_white_pulse_release_slider.value()
-        bs.white_pulse_detect_low_hz = self.beat_white_low_spin.value()
-        bs.white_pulse_detect_high_hz = self.beat_white_high_spin.value()
         self.controller.apply_config_changes()
 
     def _on_beat_white_changed(self, *_args) -> None:

@@ -416,19 +416,20 @@ class VisualizationEngine:
         not anticipate one, so the pause always starts right on the trigger
         and the color flash is simply delayed until the pause ends.
 
-        Independently, a random subset of the actual flashes (see
-        white_pulse_* config) also briefly push saturation toward one
-        extreme right as they happen - a hi-hat/cymbal-style accent that
-        snaps to near-white (or, inverted, to fully vivid) for an instant.
-
-        Dark and white pulses are mutually exclusive PER BEAT: whichever of
-        their two (independently configurable) frequency bands has more
-        energy right at that beat is the only one eligible to roll its own
-        probability - otherwise, since both would roll independent dice on
-        every single beat, they'd land on the same hit constantly. As long
-        as the two bands don't overlap (e.g. dark tuned to the kick's range,
-        white to the hi-hat's), this keeps them visually distinct accents
-        instead of frequently piling up on top of each other."""
+        Independently, on that SAME beat, a white pulse can also be rolled
+        (see white_pulse_* config) - briefly pushing saturation toward one
+        extreme, a hi-hat/cymbal-style accent that snaps to near-white (or,
+        inverted, to fully vivid) for an instant. Dark and white pulses each
+        roll their own independent probability on every beat - deliberately
+        simple: an earlier version tried to make them mutually exclusive by
+        comparing their two configurable frequency bands (so a kick-like hit
+        could only trigger dark, a hi-hat-like hit only white), but that
+        comparison isn't reliable in practice - averaging a wide frequency
+        band's level dilutes a sharp, narrow transient (a real kick's energy
+        lives in a narrow ~40-100 Hz sliver, not evenly across a whole
+        "0-6000 Hz" band) enough that it stopped firing reliably at all.
+        Independent rolls trade "guaranteed never both on the same beat" for
+        "always works"."""
         cfg = self.config.color_mapping.beat_sync
 
         raw_energy = band_energy(frame, cfg.detect_low_hz, cfg.detect_high_hz)
@@ -436,29 +437,23 @@ class VisualizationEngine:
 
         flash_now = False
         if is_beat:
-            dark_band_energy = band_energy(frame, cfg.dark_pulse_detect_low_hz, cfg.dark_pulse_detect_high_hz)
-            white_band_energy = band_energy(frame, cfg.white_pulse_detect_low_hz, cfg.white_pulse_detect_high_hz)
-            dark_is_dominant = dark_band_energy >= white_band_energy
-
-            triggered_dark_pulse = (
-                dark_is_dominant
-                and cfg.dark_pulse_probability > 0.0
+            if (
+                cfg.dark_pulse_probability > 0.0
                 and cfg.dark_pulse_duration_ms > 0.0
                 and random.random() < cfg.dark_pulse_probability
-            )
-            if triggered_dark_pulse:
+            ):
                 self._beat_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0
             else:
                 self._beat_dark_until = None
                 flash_now = True
-                if (
-                    not dark_is_dominant
-                    and cfg.white_pulse_enabled
-                    and cfg.white_pulse_probability > 0.0
-                    and cfg.white_pulse_duration_ms > 0.0
-                    and random.random() < cfg.white_pulse_probability
-                ):
-                    self._beat_white_pulse_until = wall_now + cfg.white_pulse_duration_ms / 1000.0
+
+            if (
+                cfg.white_pulse_enabled
+                and cfg.white_pulse_probability > 0.0
+                and cfg.white_pulse_duration_ms > 0.0
+                and random.random() < cfg.white_pulse_probability
+            ):
+                self._beat_white_pulse_until = wall_now + cfg.white_pulse_duration_ms / 1000.0
 
         if self._beat_dark_until is not None and wall_now >= self._beat_dark_until:
             self._beat_dark_until = None
