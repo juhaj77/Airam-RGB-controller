@@ -34,6 +34,22 @@ every lamp you own.
 > *things you still need to test* about your specific bulbs. This README assumes you
 > will run Phase 1 (below) against your real hardware before relying on anything else.
 
+## Demo video
+
+[`airam_final.mp4`](airam_final.mp4) shows the app running against real hardware.
+
+> **Heads up:** this was filmed on a phone, and the phone's camera continuously
+> auto-adjusts exposure and white balance while recording - it's constantly trying to
+> "correct" what it thinks is a color cast or an under/overexposed scene. That fights
+> directly against what the lights are actually doing, so the video **undersells the
+> real effect**: color transitions look laggier/smoother than they are (the camera is
+> chasing them), whites and saturated hues can look shifted or washed out, and fast
+> brightness changes (e.g. Beat Sync flashes) get flattened as the camera's exposure
+> hunts to compensate. In person, colors are more saturated, whites are actually white,
+> and the beat-synced flashes/pulses are far snappier than the video suggests. If your
+> phone lets you lock AE/AWB (exposure and white balance) before recording, that will
+> get you a much more accurate capture.
+
 **At a glance:**
 
 - **100% local control** - WASAPI loopback audio (or a real microphone, if you want
