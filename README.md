@@ -36,7 +36,10 @@ every lamp you own.
 
 ## Demo video
 
-[`airam_final.mp4`](airam_final.mp4) shows the app running against real hardware.
+[Watch the demo video](https://github.com/juhaj77/Airam-RGB-controller/releases/download/v1.0-demo/airam_final.mp4)
+(hosted as a GitHub Release asset - GitHub's in-repo file viewer refuses to preview
+video files past a few MB, so it isn't committed directly into the repo) shows the app
+running against real hardware.
 
 > **Heads up:** this was filmed on a phone, and the phone's camera continuously
 > auto-adjusts exposure and white balance while recording - it's constantly trying to
