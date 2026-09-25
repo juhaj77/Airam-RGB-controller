@@ -159,7 +159,10 @@ class ColorMappingTab(QWidget):
         self.beat_min_energy_slider = FloatSlider(
             "Min energy floor", 0.0, 1.0, bs.min_energy,
             tooltip="Absolute loudness floor below which nothing can trigger, even if it's a relative "
-            "spike - keeps quiet passages from firing hue/brightness snaps or pulses on near-silence.",
+            "spike - keeps quiet passages from firing hue/brightness snaps or pulses on near-silence. "
+            "This is an AUDIO-side gate inside the beat detector itself, deciding whether a moment "
+            "counts as a beat at all - unrelated to the Global tab's 'Min change threshold', which is a "
+            "NETWORK optimization applied afterward, on the already-computed color.",
         )
         for w in (self.beat_sensitivity_slider, self.beat_min_interval_slider, self.beat_min_energy_slider):
             w.valueChanged.connect(self._on_beat_changed)
@@ -607,13 +610,28 @@ class ColorMappingTab(QWidget):
         self.curve_combo = QComboBox()
         self.curve_combo.addItems(["linear", "log", "exp2"])
         self.curve_combo.setCurrentText(cm.response_curve)
+        self.curve_combo.setToolTip(
+            "Reshapes the raw 0..1 audio level BEFORE it becomes brightness/hue, in RGB Frequency, "
+            "Custom, HSV Music, and 8-Band Spectrum modes only (Beat Sync, Peak Flash, and Beat Sync "
+            "White don't use this at all - they react to individual detected hits instead of a "
+            "continuous level). linear: unchanged. log: boosts quiet detail, so quieter passages still "
+            "show visible variation instead of looking flat/dark. exp2: the opposite - suppresses quiet "
+            "background noise and emphasizes strong peaks, for a punchier, more contrasty look."
+        )
         self.curve_combo.currentTextChanged.connect(self._on_curve_changed)
         curve_row.addWidget(self.curve_combo)
         curve_row.addStretch(1)
         global_layout.addLayout(curve_row)
 
         self.threshold_slider = FloatSlider(
-            "Min change threshold", 0.0, 0.2, cm.smoothing.min_change_threshold, decimals=3
+            "Min change threshold", 0.0, 0.2, cm.smoothing.min_change_threshold, decimals=3,
+            tooltip="A NETWORK optimization, not an audio one - applies to every mode, including Beat "
+            "Sync. After a color is already computed, if it's barely different from the last color "
+            "actually SENT to that lamp (within this much per R/G/B channel, 0..1), the send is simply "
+            "skipped to cut needless Wi-Fi/Tuya traffic - it never affects what gets computed, only "
+            "whether a near-duplicate is worth transmitting. This is unrelated to 'Min energy floor' in "
+            "Beat Sync/Peak Flash, which instead gates whether a quiet moment is allowed to count as a "
+            "beat at all, on the audio side, before any color is even computed.",
         )
         self.threshold_slider.valueChanged.connect(self._on_threshold_changed)
         global_layout.addWidget(self.threshold_slider)
