@@ -144,18 +144,11 @@ class VisualizationEngine:
         self._smoother_beat_white = AttackReleaseSmoother(bs.white_pulse_attack_ms, bs.white_pulse_release_ms)
         self._beat_dark_until: Optional[float] = None  # set while a dark-pulse pause is pending/active
         self._beat_white_pulse_until: Optional[float] = None  # set while a white-pulse hold is pending/active
-        # Last tick's smoothed pulse amount (see _smoother_beat_dark/_white
-        # above) - a new pulse may only START once the previous one has
+        # Last tick's smoothed white-pulse amount (see _smoother_beat_white
+        # above and the comment on white_ready in _tick_beat_sync_mode) - a
+        # new true-white flash may only START once the previous one has
         # actually faded back out below _WHITE_PULSE_EPSILON, not merely
-        # once _beat_dark_until/_beat_white_pulse_until go back to None.
-        # Without this, back-to-back beats (a fast/dense track, or a high
-        # probability) can start a brand new pulse the instant the previous
-        # one's fixed duration ends, even while its release is still easing
-        # out - net effect, a lamp that's supposed to flash briefly instead
-        # reads as permanently stuck in the pulse (physically parked in
-        # WHITE work_mode, for the true-white pulse) for as long as the
-        # music keeps supplying beats.
-        self._last_dark_amount = 0.0
+        # once _beat_white_pulse_until goes back to None.
         self._last_white_amount = 0.0
         self.last_beat_time: Optional[float] = None
 
@@ -492,18 +485,27 @@ class VisualizationEngine:
         raw_energy = band_energy(frame, cfg.detect_low_hz, cfg.detect_high_hz)
         is_beat = self._beat_detector.update(raw_energy, wall_now)
 
-        dark_ready = self._beat_dark_until is None and self._last_dark_amount <= _WHITE_PULSE_EPSILON
+        # Dark pulse only needs "not currently active" - it's a plain RGB
+        # brightness multiplier, so even a fast chain of back-to-back pulses
+        # is at worst a rapid strobe (arguably the point, at a high
+        # probability), never a lamp stuck in some other physical state.
+        # White pulse ALSO requires the previous one to have fully faded
+        # below the epsilon (not just ended) before a new one can start -
+        # that extra gate matters there specifically because
+        # white_pulse_true_white briefly switches the lamp's real WHITE
+        # work_mode on, and immediately re-triggering before the fade-out
+        # finished was, in practice, keeping lamps pinned in that physical
+        # mode almost continuously on fast/dense tracks (see
+        # test_rapid_repeated_beats_do_not_extend_pulse_forever).
+        dark_ready = self._beat_dark_until is None
         white_ready = self._beat_white_pulse_until is None and self._last_white_amount <= _WHITE_PULSE_EPSILON
 
         flash_now = False
         if is_beat:
-            # Gated on "ready" (pulse not active AND already fully faded
-            # back out), not just "not active" - without the fade check, a
-            # fixed-duration pulse's END could immediately be followed by a
-            # brand new one on the very next beat, before its own release
-            # ever finished easing out, so a dense/fast track could still
-            # keep a lamp pinned in the pulse indefinitely even though no
-            # single pulse was ever individually extended.
+            # Also gated on "not currently active" for dark, so a fixed-
+            # duration pulse can never be extended/re-rolled mid-flight by a
+            # later beat (see the class's docstring) - only whether/when the
+            # NEXT one can start differs between dark and white, per above.
             if dark_ready and (
                 cfg.dark_pulse_enabled
                 and cfg.dark_pulse_probability > 0.0
@@ -544,7 +546,6 @@ class VisualizationEngine:
         # above, since that would tie its timing to brightness_attack_ms/
         # release_ms instead of its own dark_pulse_attack_ms/release_ms.
         dark_amount = self._smoother_beat_dark.update(1.0 if in_dark_pulse else 0.0, dt)
-        self._last_dark_amount = dark_amount
         if dark_amount > 0.0:
             value_s = value_s * (1.0 - dark_amount * cfg.dark_pulse_depth)
 
