@@ -21,7 +21,14 @@ from types import SimpleNamespace
 
 from airam_lights.color.models import Color, WhiteTarget
 from airam_lights.config.schema import NetworkConfig
-from airam_lights.lamps.manager import _RECONNECT_THRESHOLD, _WHITE_UNSUPPORTED_THRESHOLD, LampWorker
+import time
+
+from airam_lights.lamps.manager import (
+    _RECONNECT_THRESHOLD,
+    _WHITE_RETRY_COOLDOWN_S,
+    _WHITE_UNSUPPORTED_THRESHOLD,
+    LampWorker,
+)
 from airam_lights.lamps.tuya_device import LampStatus
 
 
@@ -105,6 +112,37 @@ def test_gives_up_on_white_after_threshold_consecutive_failures():
     worker._send_white(WhiteTarget(brightness=1.0, temp=1.0))
     assert worker._white_unsupported is True
     assert worker._consecutive_white_failures == _WHITE_UNSUPPORTED_THRESHOLD
+    # A cooldown, not a permanent ban - must be scheduled roughly
+    # _WHITE_RETRY_COOLDOWN_S out from right now.
+    remaining = worker._white_retry_after - time.perf_counter()
+    assert 0 < remaining <= _WHITE_RETRY_COOLDOWN_S
+
+
+def test_white_unsupported_is_a_cooldown_not_a_permanent_ban():
+    """Regression test: giving up on white used to be permanent for the rest
+    of the run. In practice, on a long session, EVERY lamp occasionally has
+    a transient white-send hiccup (Wi-Fi jitter, a brief contention window)
+    even though RGB colour keeps succeeding fine (which resets the general
+    failure counter, so the reconnect mechanism never kicks in to give it a
+    fresh chance either) - over enough time, most/all lamps could eventually
+    rack up 5-in-a-row bad luck and drop out of the white-pulse effect one
+    by one, permanently, even though they're perfectly capable. A device
+    must get an automatic retry once its cooldown elapses."""
+    device = _AlwaysFailsWhiteDevice()
+    worker = _make_worker(device)
+    for _ in range(_WHITE_UNSUPPORTED_THRESHOLD):
+        worker._send_white(WhiteTarget(brightness=1.0, temp=1.0))
+    assert worker._white_unsupported is True
+
+    # Simulate the cooldown having elapsed (this is exactly what run()'s own
+    # guard checks before ever calling _send_white again).
+    worker._white_retry_after = time.perf_counter() - 1.0
+
+    # The transient issue is gone now - this retry succeeds.
+    device.set_white = lambda brightness_percent, temp_percent, wait_for_ack=False: 5.0
+    worker._send_white(WhiteTarget(brightness=1.0, temp=1.0))
+    assert worker._white_unsupported is False
+    assert worker._consecutive_white_failures == 0
 
 
 def test_a_successful_white_send_resets_the_failure_streak():

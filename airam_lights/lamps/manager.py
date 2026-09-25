@@ -34,8 +34,20 @@ logger = logging.getLogger("airam_lights.lamps")
 
 # After this many CONSECUTIVE white-mode send failures (see
 # LampWorker._consecutive_white_failures), a device is marked white-mode
-# unsupported for the rest of this run - see the comment on that field.
+# unsupported and stops attempting white sends until the cooldown below
+# elapses - see the comment on that field.
 _WHITE_UNSUPPORTED_THRESHOLD = 5
+
+# How long a device sits out white-mode attempts after being marked
+# unsupported, before ONE retry is allowed again (a plain circuit breaker,
+# not a permanent give-up). A genuinely incompatible bulb just re-trips this
+# every ~30s at negligible cost either way; the point is a lamp that failed
+# 5 times in a row purely from a transient blip (Wi-Fi jitter, a brief
+# contention window) isn't locked out of the effect for the rest of a long
+# session, which in practice looked like "most lamps stop doing the white
+# flash" after running for a while - each one only needed bad luck on 5
+# white attempts, at some point, to drop out permanently.
+_WHITE_RETRY_COOLDOWN_S = 30.0
 
 # After this many CONSECUTIVE failures of ANY kind (RGB colour or white -
 # see LampWorker._consecutive_failures), the worker rebuilds the tinytuya
@@ -92,6 +104,7 @@ class LampWorker(threading.Thread):
         # for the remainder of white-mode requests instead of erroring.
         self._consecutive_white_failures = 0
         self._white_unsupported = False
+        self._white_retry_after = 0.0  # perf_counter() timestamp - see _WHITE_RETRY_COOLDOWN_S
 
     def set_target(self, color: Color) -> None:
         with self._lock:
@@ -146,7 +159,7 @@ class LampWorker(threading.Thread):
                     color, white = self._target_color, self._target_white
 
             if white is not None:
-                if self._white_unsupported:
+                if self._white_unsupported and time.perf_counter() < self._white_retry_after:
                     continue
                 if self._last_sent_white is not None and white.distance(self._last_sent_white) < self.min_change_threshold:
                     self.stats.commands_skipped_unchanged += 1
@@ -232,16 +245,19 @@ class LampWorker(threading.Thread):
             self._last_sent_white = target
             self._last_sent_color = None
             self._consecutive_white_failures = 0
+            self._white_unsupported = False
             self._on_send_success()
         except Exception as e:
             self._consecutive_white_failures += 1
             if self._consecutive_white_failures >= _WHITE_UNSUPPORTED_THRESHOLD:
                 self._white_unsupported = True
+                self._white_retry_after = time.perf_counter() + _WHITE_RETRY_COOLDOWN_S
                 logger.warning(
-                    "'%s' (%s) failed WHITE work_mode %d times in a row - giving up on white-mode "
-                    "commands for this device for the rest of this run (RGB colour is unaffected). "
-                    "Last error: %s",
-                    self.device.config.name, self.device.config.ip, self._consecutive_white_failures, e,
+                    "'%s' (%s) failed WHITE work_mode %d times in a row - pausing white-mode commands "
+                    "for this device for %ds (RGB colour is unaffected); will try again automatically "
+                    "after that. Last error: %s",
+                    self.device.config.name, self.device.config.ip, self._consecutive_white_failures,
+                    int(_WHITE_RETRY_COOLDOWN_S), e,
                 )
             self._on_send_failure(e)
 
