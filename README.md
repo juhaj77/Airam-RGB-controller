@@ -17,9 +17,11 @@ every lamp you own.
 > **Beat Sync is the most interesting mode - and the default.** Of all the
 > color-mapping modes, it's the one that consistently feels the most visually alive in
 > practice - a percussive flash-and-decay on every beat, optionally with **dark pulses**
-> (a rhythm-synced pause before the flash) and **white pulses** (a hi-hat/cymbal-style
-> saturation accent), instead of the continuous, sometimes-muted blending the other
-> modes do. It also ships paired with the **Chase / Rotating Light overlay** enabled
+> (a rhythm-synced pause before the flash, off by default) and **white pulses** (a
+> hi-hat/cymbal-style accent, **on by default** with tuned timing - a real flash to the
+> bulb's physical WHITE work_mode at the pulse's peak, not just an RGB approximation),
+> instead of the continuous, sometimes-muted blending the other modes do. It also ships
+> paired with the **Chase / Rotating Light overlay** enabled
 > by default, set to **complementary** color - a highlight that rotates through your
 > chase-ordered lamps always showing the opposite hue of whatever Beat Sync just put
 > there, so the combination stays visually varied instead of settling into one static
@@ -326,19 +328,23 @@ starts right on the trigger and the actual color flash is simply delayed until t
 - not a pause *before* the hit, but a hesitation *right on* the hit before committing to the
 flash.
 
-**White pulses**: independent of dark pulses, `white_pulse_probability` (0..1, off by
-default - toggle `white_pulse_enabled`) is the chance a given beat's flash *also* gets a
+**White pulses**: independent of dark pulses, `white_pulse_probability` (0..1, **on by
+default** - toggle `white_pulse_enabled`) is the chance a given beat's flash *also* gets a
 brief white accent, for `white_pulse_duration_ms`, with its own `white_pulse_attack_ms`/
-`release_ms` controlling how sharply it snaps in and eases back out. Dark and white pulses
-each roll their own probability independently on every beat - both, either, or neither can
-happen on any given hit, so with both enabled at non-trivial probabilities you'll
-occasionally see them coincide; that's expected rather than a bug.
+`release_ms` controlling how sharply it snaps in and eases back out. The shipped defaults
+(probability 0.26, duration 45ms, attack 17ms, release 49ms, brightness 0.3, temp 0.5) were
+tuned live against real hardware until the combination read as musically "in harmony"
+rather than a jarring or washed-out accent - a reasonable starting point to tweak from
+rather than a neutral/untuned one. Dark and white pulses each roll their own probability
+independently on every beat - both, either, or neither can happen on any given hit, so with
+both enabled at non-trivial probabilities you'll occasionally see them coincide; that's
+expected rather than a bug.
 
 By default (`white_pulse_true_white`, on) this is a **"true white" flash**: at the pulse's
 peak the lamp actually switches its physical **WHITE work_mode** on - the real white
-diode(s), not an RGB approximation - at `white_pulse_white_brightness` (default 1.0,
-strongest intensity) and `white_pulse_white_temp` (default 1.0, coolest white reads as the
-punchiest accent), then switches back to RGB colour mode once the pulse ends and resumes
+diode(s), not an RGB approximation - at `white_pulse_white_brightness` (default 0.3) and
+`white_pulse_white_temp` (default 0.5, roughly neutral - push toward 1.0 for a colder,
+punchier accent), then switches back to RGB colour mode once the pulse ends and resumes
 wherever the normal Beat Sync hue/brightness envelope has evolved to in the meantime - the
 show continues exactly where it left off, it's just been briefly interrupted by a real
 white flash. Turn `white_pulse_true_white` off to fall back to the older, softer behavior

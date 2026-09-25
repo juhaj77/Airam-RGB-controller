@@ -284,13 +284,18 @@ class BeatSyncModeConfig:
     # every beat (an earlier version tried to make them mutually exclusive
     # via separate detection bands, but that wasn't reliable - see
     # VisualizationEngine._tick_beat_sync_mode's docstring for why).
-    white_pulse_enabled: bool = False
+    # On by default with tuned timing (see white_pulse_true_white below) -
+    # this combination (probability/duration/attack/release/brightness/temp)
+    # was tuned live against real hardware and confirmed to read well, so it
+    # ships as the default rather than a generic/untuned starting point that
+    # would undersell the effect on first run.
+    white_pulse_enabled: bool = True
     white_pulse_invert: bool = False
-    white_pulse_probability: float = 0.3  # 0..1: chance a given beat's flash also gets this pulse
-    white_pulse_duration_ms: float = 80.0  # how long saturation holds at the extreme
+    white_pulse_probability: float = 0.26  # 0..1: chance a given beat's flash also gets this pulse
+    white_pulse_duration_ms: float = 45.0  # how long saturation holds at the extreme
     white_pulse_depth: float = 1.0  # 0..1: how far toward the extreme (1.0 = fully white/fully saturated)
-    white_pulse_attack_ms: float = 15.0  # how fast saturation snaps toward the extreme
-    white_pulse_release_ms: float = 150.0  # how fast it settles back to the base saturation afterward
+    white_pulse_attack_ms: float = 17.0  # how fast saturation snaps toward the extreme
+    white_pulse_release_ms: float = 49.0  # how fast it settles back to the base saturation afterward
 
     # "True white" pulses: instead of just desaturating the RGB color toward
     # white (which on an RGB LED only ever approximates white, and reads as
@@ -312,8 +317,8 @@ class BeatSyncModeConfig:
     # practice, which looked like brightness never quite reaching its peak
     # and inconsistent behavior between lamps.
     white_pulse_true_white: bool = True
-    white_pulse_white_brightness: float = 1.0  # 0..1: brightness during the true-white flash
-    white_pulse_white_temp: float = 1.0  # 0..1, 0=warmest..1=coolest; 1.0 = coolest white
+    white_pulse_white_brightness: float = 0.3  # 0..1: brightness during the true-white flash
+    white_pulse_white_temp: float = 0.5  # 0..1, 0=warmest..1=coolest
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -341,16 +346,16 @@ class BeatSyncModeConfig:
             dark_pulse_depth=float(d.get("dark_pulse_depth", 1.0)),
             dark_pulse_attack_ms=float(d.get("dark_pulse_attack_ms", 15.0)),
             dark_pulse_release_ms=float(d.get("dark_pulse_release_ms", 150.0)),
-            white_pulse_enabled=bool(d.get("white_pulse_enabled", False)),
+            white_pulse_enabled=bool(d.get("white_pulse_enabled", True)),
             white_pulse_invert=bool(d.get("white_pulse_invert", False)),
-            white_pulse_probability=float(d.get("white_pulse_probability", 0.3)),
-            white_pulse_duration_ms=float(d.get("white_pulse_duration_ms", 80.0)),
+            white_pulse_probability=float(d.get("white_pulse_probability", 0.26)),
+            white_pulse_duration_ms=float(d.get("white_pulse_duration_ms", 45.0)),
             white_pulse_depth=float(d.get("white_pulse_depth", 1.0)),
-            white_pulse_attack_ms=float(d.get("white_pulse_attack_ms", 15.0)),
-            white_pulse_release_ms=float(d.get("white_pulse_release_ms", 150.0)),
+            white_pulse_attack_ms=float(d.get("white_pulse_attack_ms", 17.0)),
+            white_pulse_release_ms=float(d.get("white_pulse_release_ms", 49.0)),
             white_pulse_true_white=bool(d.get("white_pulse_true_white", True)),
-            white_pulse_white_brightness=float(d.get("white_pulse_white_brightness", 1.0)),
-            white_pulse_white_temp=float(d.get("white_pulse_white_temp", 1.0)),
+            white_pulse_white_brightness=float(d.get("white_pulse_white_brightness", 0.3)),
+            white_pulse_white_temp=float(d.get("white_pulse_white_temp", 0.5)),
         )
 
 
