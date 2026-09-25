@@ -14,6 +14,7 @@ one worker thread per lamp for exactly this reason.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -41,6 +42,26 @@ class LampDevice:
         self.status = LampStatus()
         self._bulb = None
         self._connect_error: Optional[str] = None
+        # tinytuya.BulbDevice keeps mutable, non-thread-safe internal state
+        # (bulb_configured, dpset, its persistent socket) - this device gets
+        # called both from its own LampWorker thread (color/white commands)
+        # and from a separate status-refresh ThreadPoolExecutor (Diagnostics
+        # tab / periodic polling, see LampManager.refresh_all_status()).
+        # Without serializing access, two threads touching the same
+        # BulbDevice at once can interleave its internal bulb-type/DP-range
+        # detection and produce exactly the kind of intermittent, seemingly
+        # random "Bulb not configured" / internal AttributeError-style
+        # failures seen in practice - confirmed by these only ever
+        # surfacing on the more state-heavy WHITE work_mode call path.
+        self._bulb_lock = threading.Lock()
+        # See set_white() - only ever force one blocking status() call for
+        # detection, even if it doesn't resolve bulb_configured. Retrying it
+        # on every single failed white-mode attempt (this device gets called
+        # roughly every backoff interval, forever, for a bulb that never
+        # detects) was hammering the persistent socket hard enough in
+        # practice to apparently degrade the connection for that device
+        # entirely - RGB colour stopped working too, not just white mode.
+        self._white_detect_attempted = False
         self._build()
 
     def _build(self) -> None:
@@ -87,7 +108,8 @@ class LampDevice:
 
         t0 = time.perf_counter()
         try:
-            result = self._bulb.status()
+            with self._bulb_lock:
+                result = self._bulb.status()
             latency_ms = (time.perf_counter() - t0) * 1000.0
 
             if isinstance(result, dict) and "dps" in result:
@@ -127,7 +149,8 @@ class LampDevice:
         if self._bulb is None:
             return
         try:
-            self._bulb.set_mode("colour")
+            with self._bulb_lock:
+                self._bulb.set_mode("colour")
         except Exception:
             logger.debug("set_mode('colour') not supported/failed for %s (may be fine)", self.config.name)
 
@@ -136,7 +159,8 @@ class LampDevice:
         if self._bulb is None:
             raise RuntimeError(self._connect_error or "device not initialized")
         t0 = time.perf_counter()
-        self._bulb.set_colour(r, g, b, nowait=not wait_for_ack)
+        with self._bulb_lock:
+            self._bulb.set_colour(r, g, b, nowait=not wait_for_ack)
         latency_ms = (time.perf_counter() - t0) * 1000.0
         self.status.last_latency_ms = latency_ms
         self.status.online = True
@@ -147,7 +171,8 @@ class LampDevice:
         if self._bulb is None:
             raise RuntimeError(self._connect_error or "device not initialized")
         t0 = time.perf_counter()
-        self._bulb.set_brightness_percentage(max(0, min(100, round(percent))), nowait=not wait_for_ack)
+        with self._bulb_lock:
+            self._bulb.set_brightness_percentage(max(0, min(100, round(percent))), nowait=not wait_for_ack)
         latency_ms = (time.perf_counter() - t0) * 1000.0
         self.status.last_latency_ms = latency_ms
         return latency_ms
@@ -159,7 +184,8 @@ class LampDevice:
         if self._bulb is None:
             return
         try:
-            self._bulb.set_mode("white")
+            with self._bulb_lock:
+                self._bulb.set_mode("white")
         except Exception:
             logger.debug("set_mode('white') not supported/failed for %s (may be fine)", self.config.name)
 
@@ -179,10 +205,57 @@ class LampDevice:
         if self._bulb is None:
             raise RuntimeError(self._connect_error or "device not initialized")
         t0 = time.perf_counter()
-        self._bulb.set_colourtemp_percentage(max(0, min(100, round(temp_percent))), nowait=not wait_for_ack)
-        self._bulb.set_brightness_percentage(max(0, min(100, round(brightness_percent))), nowait=not wait_for_ack)
+        # tinytuya's set_colourtemp_percentage()/set_brightness_percentage()
+        # both need self._bulb.bulb_configured (its own DP-layout detection,
+        # populated from a status() response) before they can compute a raw
+        # DP value from a percentage. They try to self-detect via
+        # detect_bulb(nowait=...), but with nowait=True (our default here,
+        # via wait_for_ack=False) that detection silently no-ops if there is
+        # no cached status yet - e.g. the very first white-mode command ever
+        # sent to this device - and then raises "Bulb not configured, cannot
+        # determine value ranges." Force one blocking status() call up front
+        # in exactly that situation, so detection actually happens instead
+        # of being skipped - but only ONCE ever for this device (see
+        # self._white_detect_attempted), not on every call: a bulb whose
+        # response never lets tinytuya classify it would otherwise get this
+        # forced status() call again on every single retry forever, which in
+        # practice was enough to degrade its persistent connection entirely.
+        # Held for the whole detect+set sequence below, not just each
+        # individual call - otherwise a status-refresh on another thread
+        # could slip in between the detect and the two DP writes and hand
+        # this bulb_configured/dpset state to a different call halfway
+        # through, which is exactly the kind of interleaving that produced
+        # the intermittent "Bulb not configured" / internal errors this
+        # lock exists to prevent (see the comment on self._bulb_lock).
+        with self._bulb_lock:
+            if not self._white_detect_attempted and not getattr(self._bulb, "bulb_configured", False):
+                self._white_detect_attempted = True
+                self._bulb.status()
+
+            # Each DP is attempted independently (not short-circuited by the
+            # other failing) - some bulb variants only implement one of the
+            # two (e.g. a colour-temp-only or brightness-only DP layout),
+            # and a tinytuya-internal error on one (seen in practice: a bare
+            # "NoneType has no len()" from inside its own DP-range lookup,
+            # on top of the "Bulb not configured" case handled above)
+            # shouldn't also block a DP that actually works on that bulb.
+            errors = []
+            try:
+                self._bulb.set_colourtemp_percentage(max(0, min(100, round(temp_percent))), nowait=not wait_for_ack)
+            except Exception as e:
+                errors.append(f"colourtemp: {e}")
+            try:
+                self._bulb.set_brightness_percentage(
+                    max(0, min(100, round(brightness_percent))), nowait=not wait_for_ack
+                )
+            except Exception as e:
+                errors.append(f"brightness: {e}")
+
         latency_ms = (time.perf_counter() - t0) * 1000.0
         self.status.last_latency_ms = latency_ms
+        if errors:
+            self.status.last_error = "; ".join(errors)
+            raise RuntimeError("; ".join(errors))
         self.status.online = True
         self.status.last_error = None
         return latency_ms
@@ -190,9 +263,11 @@ class LampDevice:
     def turn_on(self, wait_for_ack: bool = False) -> None:
         if self._bulb is None:
             raise RuntimeError(self._connect_error or "device not initialized")
-        self._bulb.turn_on(nowait=not wait_for_ack)
+        with self._bulb_lock:
+            self._bulb.turn_on(nowait=not wait_for_ack)
 
     def turn_off(self, wait_for_ack: bool = False) -> None:
         if self._bulb is None:
             raise RuntimeError(self._connect_error or "device not initialized")
-        self._bulb.turn_off(nowait=not wait_for_ack)
+        with self._bulb_lock:
+            self._bulb.turn_off(nowait=not wait_for_ack)

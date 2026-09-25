@@ -52,6 +52,15 @@ from ..lamps.manager import LampManager
 
 logger = logging.getLogger("airam_lights.engine")
 
+# Below this, a dark/white pulse's smoothed amount is considered to have
+# finished fading back out - both (a) a true-white pulse's device reverts to
+# normal RGB sends, and (b) either pulse becomes eligible to trigger again
+# on a future beat. The underlying smoother only asymptotically approaches
+# 0 and never quite reaches it, so without a floor a lamp could stay parked
+# in a permanent, imperceptibly-dim WHITE work_mode forever, and/or a new
+# pulse could never be considered "fully faded" enough to allow retriggering.
+_WHITE_PULSE_EPSILON = 0.02
+
 
 class TimeSeriesBuffer:
     """Small history of (timestamp, vector) samples, used to implement the
@@ -135,6 +144,19 @@ class VisualizationEngine:
         self._smoother_beat_white = AttackReleaseSmoother(bs.white_pulse_attack_ms, bs.white_pulse_release_ms)
         self._beat_dark_until: Optional[float] = None  # set while a dark-pulse pause is pending/active
         self._beat_white_pulse_until: Optional[float] = None  # set while a white-pulse hold is pending/active
+        # Last tick's smoothed pulse amount (see _smoother_beat_dark/_white
+        # above) - a new pulse may only START once the previous one has
+        # actually faded back out below _WHITE_PULSE_EPSILON, not merely
+        # once _beat_dark_until/_beat_white_pulse_until go back to None.
+        # Without this, back-to-back beats (a fast/dense track, or a high
+        # probability) can start a brand new pulse the instant the previous
+        # one's fixed duration ends, even while its release is still easing
+        # out - net effect, a lamp that's supposed to flash briefly instead
+        # reads as permanently stuck in the pulse (physically parked in
+        # WHITE work_mode, for the true-white pulse) for as long as the
+        # music keeps supplying beats.
+        self._last_dark_amount = 0.0
+        self._last_white_amount = 0.0
         self.last_beat_time: Optional[float] = None
 
         pf = config.color_mapping.peak_flash
@@ -177,6 +199,11 @@ class VisualizationEngine:
         self.latest_band8_levels: list = [0.0] * len(config.bands_8)
         self.latest_lamp_colors: Dict[str, Color] = {}
         self.latest_lamp_white_targets: Dict[str, WhiteTarget] = {}  # actual DP targets for beat_sync_white mode
+        # Populated by _tick_beat_sync_mode only, for lamps currently mid
+        # "true white" flash (see BeatSyncModeConfig.white_pulse_true_white) -
+        # reset to {} at the top of every tick_visual() so a stale entry can
+        # never survive into a tick where the mode has since changed.
+        self._beat_sync_white_targets: Dict[str, WhiteTarget] = {}
 
     # -- configuration -----------------------------------------------------------
 
@@ -285,6 +312,7 @@ class VisualizationEngine:
             return
 
         mode = self.config.color_mapping.mode
+        self._beat_sync_white_targets = {}  # only _tick_beat_sync_mode ever (re-)populates this
 
         if mode == "beat_sync_white":
             # A different physical DP (brightness+temp, work_mode='white')
@@ -321,10 +349,25 @@ class VisualizationEngine:
         if colors and self.config.group_switch.enabled:
             colors = self._apply_group_switch_overlay(colors, frame, dt, wall_now, selected_ids)
 
-        self.latest_lamp_colors = colors
-        self.latest_lamp_white_targets = {}
-        if colors:
-            self.lamp_manager.push_colors(colors)
+        if self._beat_sync_white_targets:
+            # Some lamps are mid true-white flash this tick (Beat Sync mode
+            # only) - split them out so each lamp gets exactly one command
+            # this tick, never both a colour and a white target (the worker
+            # mailbox would just have the second call clobber the first).
+            rgb_colors = {k: v for k, v in colors.items() if k not in self._beat_sync_white_targets}
+            self.latest_lamp_colors = {
+                **rgb_colors,
+                **{k: t.to_preview_color() for k, t in self._beat_sync_white_targets.items()},
+            }
+            self.latest_lamp_white_targets = dict(self._beat_sync_white_targets)
+            if rgb_colors:
+                self.lamp_manager.push_colors(rgb_colors)
+            self.lamp_manager.push_white_targets(self._beat_sync_white_targets)
+        else:
+            self.latest_lamp_colors = colors
+            self.latest_lamp_white_targets = {}
+            if colors:
+                self.lamp_manager.push_colors(colors)
 
     # -- per-mode implementations ---------------------------------------------------
 
@@ -449,20 +492,29 @@ class VisualizationEngine:
         raw_energy = band_energy(frame, cfg.detect_low_hz, cfg.detect_high_hz)
         is_beat = self._beat_detector.update(raw_energy, wall_now)
 
+        dark_ready = self._beat_dark_until is None and self._last_dark_amount <= _WHITE_PULSE_EPSILON
+        white_ready = self._beat_white_pulse_until is None and self._last_white_amount <= _WHITE_PULSE_EPSILON
+
         flash_now = False
         if is_beat:
-            if (
+            # Gated on "ready" (pulse not active AND already fully faded
+            # back out), not just "not active" - without the fade check, a
+            # fixed-duration pulse's END could immediately be followed by a
+            # brand new one on the very next beat, before its own release
+            # ever finished easing out, so a dense/fast track could still
+            # keep a lamp pinned in the pulse indefinitely even though no
+            # single pulse was ever individually extended.
+            if dark_ready and (
                 cfg.dark_pulse_enabled
                 and cfg.dark_pulse_probability > 0.0
                 and cfg.dark_pulse_duration_ms > 0.0
                 and random.random() < cfg.dark_pulse_probability
             ):
                 self._beat_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0
-            else:
-                self._beat_dark_until = None
+            elif self._beat_dark_until is None:
                 flash_now = True
 
-            if (
+            if white_ready and (
                 cfg.white_pulse_enabled
                 and cfg.white_pulse_probability > 0.0
                 and cfg.white_pulse_duration_ms > 0.0
@@ -492,17 +544,29 @@ class VisualizationEngine:
         # above, since that would tie its timing to brightness_attack_ms/
         # release_ms instead of its own dark_pulse_attack_ms/release_ms.
         dark_amount = self._smoother_beat_dark.update(1.0 if in_dark_pulse else 0.0, dt)
+        self._last_dark_amount = dark_amount
         if dark_amount > 0.0:
             value_s = value_s * (1.0 - dark_amount * cfg.dark_pulse_depth)
 
-        # depth=1.0 reaches the extreme exactly; depth=0.0 is a no-op - lerp()
-        # from the base saturation toward whichever extreme, by the smoothed
-        # 0..1 pulse amount (see the comment on _smoother_beat_white above
-        # for why this is smoothed as an amount rather than as the
-        # saturation value itself).
+        # Smoothed 0..1 "how deep into the white pulse are we" fraction (see
+        # the comment on _smoother_beat_white above for why an amount rather
+        # than the saturation value itself). What it DRIVES depends on
+        # white_pulse_true_white: normally it's used below (per lamp) to
+        # actually switch that lamp's physical WHITE work_mode on for the
+        # pulse - in which case the RGB saturation here is left alone
+        # entirely, since the RGB channel plays no part in what gets sent to
+        # the lamp during the flash, only in what it resumes to afterward.
+        # With white_pulse_invert on, there's no physical "white work_mode,
+        # but fully saturated", so that combination always falls back to the
+        # original RGB-domain blend instead.
         white_amount = self._smoother_beat_white.update(1.0 if in_white_pulse else 0.0, dt)
-        extreme = 1.0 if cfg.white_pulse_invert else 0.0
-        saturation_s = lerp(cfg.saturation, extreme, white_amount * cfg.white_pulse_depth)
+        self._last_white_amount = white_amount
+        use_true_white = cfg.white_pulse_true_white and not cfg.white_pulse_invert
+        if use_true_white:
+            saturation_s = cfg.saturation
+        else:
+            extreme = 1.0 if cfg.white_pulse_invert else 0.0
+            saturation_s = lerp(cfg.saturation, extreme, white_amount * cfg.white_pulse_depth)
 
         self.latest_band3_levels = {
             "beat_energy": raw_energy,
@@ -515,7 +579,39 @@ class VisualizationEngine:
         }
         self._history_beat.push(wall_now, np.array([hue_s, value_s, saturation_s]))
 
+        # True-white is deliberately NOT sampled through the per-lamp phase
+        # offset below like hue/value/saturation are - it's a brief, binary
+        # flash (duration_ms + attack is often well under 200ms), and
+        # different lamps sampling it at different phase-shifted instants
+        # could each just barely miss the narrow window entirely, making the
+        # flash look like it lands on arbitrary/random lamps instead of the
+        # synchronized whole-installation strobe it's meant to be. Every
+        # selected lamp enters/exits it at exactly the same wall-clock
+        # instant, using this tick's raw amount, regardless of phase offset.
+        # The target itself is also deliberately CONSTANT while active, not
+        # ramped by white_amount tick-by-tick - a real Tuya bulb needs two
+        # separate DP writes per white-mode command (colourtemp + brightness,
+        # see LampDevice.set_white()), so a smooth per-tick ramp multiplies
+        # into a burst of commands to every selected lamp at once (they're
+        # all synchronized, above) - in practice enough to overwhelm the
+        # LAN/Wi-Fi and tinytuya's own per-socket state handling, which
+        # showed up as brightness never quite reaching its peak and
+        # inconsistent behavior between lamps. A constant target lets the
+        # worker's existing min_change_threshold dedup collapse this down to
+        # one real send on entry and one on exit (reverting to RGB), exactly
+        # like every other beat-triggered event in this app already works.
+        use_true_white_now = use_true_white and white_amount > _WHITE_PULSE_EPSILON
+        shared_white_target = (
+            WhiteTarget(
+                brightness=cfg.white_pulse_white_brightness,
+                temp=cfg.white_pulse_white_temp,
+            ).clamped()
+            if use_true_white_now
+            else None
+        )
+
         colors: Dict[str, Color] = {}
+        white_targets: Dict[str, WhiteTarget] = {}
         for device_id in selected_ids:
             effect = self.config.per_lamp_effects.get(device_id)
             sample_t = wall_now - ((effect.phase_offset_ms / 1000.0) if effect else 0.0)
@@ -523,10 +619,15 @@ class VisualizationEngine:
             if vals is None:
                 vals = np.array([hue_s, value_s, saturation_s])
             mult = effect.sensitivity_mult if effect else 1.0
+
+            if shared_white_target is not None:
+                white_targets[device_id] = shared_white_target
+
             color = self.color_engine.compute_beat_sync(vals[0], vals[2], clip(vals[1] * mult))
             if effect is not None:
                 color = apply_per_lamp_effect(color, effect)
             colors[device_id] = color
+        self._beat_sync_white_targets = white_targets
         return colors
 
     def _pick_next_beat_hue(self, cfg, frame: SpectrumFrame) -> float:

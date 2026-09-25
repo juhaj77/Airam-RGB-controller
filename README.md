@@ -328,13 +328,27 @@ flash.
 
 **White pulses**: independent of dark pulses, `white_pulse_probability` (0..1, off by
 default - toggle `white_pulse_enabled`) is the chance a given beat's flash *also* gets a
-brief saturation accent - snapping toward white (or, with `white_pulse_invert`, toward
-fully vivid instead - useful if your base `saturation` is already fairly pastel) for
-`white_pulse_duration_ms`, with its own `white_pulse_attack_ms`/`release_ms` controlling
-how sharply it snaps in and eases back out. Dark and white pulses each roll their own
-probability independently on every beat - both, either, or neither can happen on any
-given hit, so with both enabled at non-trivial probabilities you'll occasionally see
-them coincide; that's expected rather than a bug.
+brief white accent, for `white_pulse_duration_ms`, with its own `white_pulse_attack_ms`/
+`release_ms` controlling how sharply it snaps in and eases back out. Dark and white pulses
+each roll their own probability independently on every beat - both, either, or neither can
+happen on any given hit, so with both enabled at non-trivial probabilities you'll
+occasionally see them coincide; that's expected rather than a bug.
+
+By default (`white_pulse_true_white`, on) this is a **"true white" flash**: at the pulse's
+peak the lamp actually switches its physical **WHITE work_mode** on - the real white
+diode(s), not an RGB approximation - at `white_pulse_white_brightness` (default 1.0,
+strongest intensity) and `white_pulse_white_temp` (default 1.0, coolest white reads as the
+punchiest accent), then switches back to RGB colour mode once the pulse ends and resumes
+wherever the normal Beat Sync hue/brightness envelope has evolved to in the meantime - the
+show continues exactly where it left off, it's just been briefly interrupted by a real
+white flash. Turn `white_pulse_true_white` off to fall back to the older, softer behavior
+instead: desaturating the RGB color toward white in place (or, with `white_pulse_invert`,
+saturating toward a fully vivid color instead - useful if your base `saturation` is already
+fairly pastel) rather than actually switching work_mode - also what always happens when
+`white_pulse_invert` is on, since there's no physical "white work_mode, but fully
+saturated." The true-white path uses the bulb's WHITE work_mode DP, same as Beat Sync White
+mode - see [section 2](#2-local-control-of-the-airam-bulbs---whats-confirmed-vs-assumed)
+for what's confirmed vs. still-unverified about that path on real hardware.
 
 #### Peak Flash mode
 A softer, more continuous cousin of Beat Sync. Instead of a fixed bass-only trigger and

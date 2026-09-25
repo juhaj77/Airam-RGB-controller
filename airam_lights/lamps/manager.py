@@ -32,6 +32,11 @@ from .tuya_device import LampDevice
 
 logger = logging.getLogger("airam_lights.lamps")
 
+# After this many CONSECUTIVE white-mode send failures (see
+# LampWorker._consecutive_white_failures), a device is marked white-mode
+# unsupported for the rest of this run - see the comment on that field.
+_WHITE_UNSUPPORTED_THRESHOLD = 5
+
 
 @dataclass
 class WorkerStats:
@@ -63,6 +68,20 @@ class LampWorker(threading.Thread):
         self._consecutive_failures = 0
         self._colour_mode_ensured = False
         self._white_mode_ensured = False
+        # Separate from _consecutive_failures above (which also counts RGB
+        # failures and resets on ANY successful send, RGB included) - some
+        # bulbs' WHITE work_mode command sequence fails every single time
+        # (seen in practice: tinytuya can never detect their DP layout well
+        # enough to compute a white-mode value, seemingly a genuine per-bulb
+        # firmware/model difference, not a transient network hiccup), while
+        # their RGB colour path works fine and keeps succeeding/resetting
+        # the shared counter. Give up specifically on white sends for this
+        # device after enough CONSECUTIVE white failures, so a chronically
+        # unsupported bulb logs one clear warning instead of retrying (and
+        # warning) forever, and simply keeps whatever it was last showing
+        # for the remainder of white-mode requests instead of erroring.
+        self._consecutive_white_failures = 0
+        self._white_unsupported = False
 
     def set_target(self, color: Color) -> None:
         with self._lock:
@@ -117,6 +136,8 @@ class LampWorker(threading.Thread):
                     color, white = self._target_color, self._target_white
 
             if white is not None:
+                if self._white_unsupported:
+                    continue
                 if self._last_sent_white is not None and white.distance(self._last_sent_white) < self.min_change_threshold:
                     self.stats.commands_skipped_unchanged += 1
                     continue
@@ -136,6 +157,15 @@ class LampWorker(threading.Thread):
         self.device.status.last_error = None
 
     def _on_send_failure(self, e: Exception) -> None:
+        # Must also stamp _last_send_time, exactly like the success path -
+        # _effective_interval()'s backoff is entirely driven by elapsed time
+        # since this timestamp, so leaving it frozen at its last SUCCESS (or
+        # the 0.0 default, if there never was one) makes every subsequent
+        # attempt see a huge "elapsed", permanently defeating the interval
+        # check and retrying at the engine's full push rate instead of
+        # backing off - exactly what turns one failing lamp into a log-spam
+        # retry storm instead of a graceful, increasingly-spaced-out retry.
+        self._last_send_time = time.perf_counter()
         self.stats.commands_failed += 1
         self._consecutive_failures += 1
         self.device.status.online = False
@@ -165,8 +195,18 @@ class LampWorker(threading.Thread):
             self.device.set_white(target.brightness * 100.0, target.temp * 100.0, wait_for_ack=False)
             self._last_sent_white = target
             self._last_sent_color = None
+            self._consecutive_white_failures = 0
             self._on_send_success()
         except Exception as e:
+            self._consecutive_white_failures += 1
+            if self._consecutive_white_failures >= _WHITE_UNSUPPORTED_THRESHOLD:
+                self._white_unsupported = True
+                logger.warning(
+                    "'%s' (%s) failed WHITE work_mode %d times in a row - giving up on white-mode "
+                    "commands for this device for the rest of this run (RGB colour is unaffected). "
+                    "Last error: %s",
+                    self.device.config.name, self.device.config.ip, self._consecutive_white_failures, e,
+                )
             self._on_send_failure(e)
 
 

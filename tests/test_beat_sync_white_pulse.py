@@ -1,0 +1,198 @@
+"""Verifies Beat Sync mode's "true white" pulse: at the peak of a white
+pulse the affected lamp should receive an actual WhiteTarget (physical
+WHITE work_mode, full brightness, coolest temp) instead of an RGB Color,
+and should fall back to normal RGB colour sends once the pulse ends -
+exercising VisualizationEngine.tick_visual() end to end with a fake clock
+and a fake lamp manager, no real audio hardware or bulbs involved.
+"""
+import airam_lights.engine.visualization_engine as ve_module
+from airam_lights.audio.capture import AudioCapture
+from airam_lights.color.models import WhiteTarget
+from airam_lights.config.schema import AppConfig, PerLampEffect
+from airam_lights.engine.visualization_engine import VisualizationEngine
+
+
+class _FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def advance(self, dt: float) -> None:
+        self.now += dt
+
+    def perf_counter(self) -> float:
+        return self.now
+
+    def time(self) -> float:
+        return self.now
+
+
+class _FakeLampManager:
+    def __init__(self, device_ids):
+        self._ids = list(device_ids)
+        self.color_calls = []
+        self.white_calls = []
+        self.call_log = []  # ordered ("color" | "white", {device_id: value}) log, across both call types
+
+    def selected_device_ids(self):
+        return list(self._ids)
+
+    def push_colors(self, colors):
+        self.color_calls.append(dict(colors))
+        self.call_log.append(("color", dict(colors)))
+
+    def push_white_targets(self, targets):
+        self.white_calls.append(dict(targets))
+        self.call_log.append(("white", dict(targets)))
+
+
+def _make_engine(monkeypatch, *, energy_sequence, device_ids=("dev1",)):
+    """energy_sequence: values returned by band_energy() on successive
+    calls (one per tick_visual() call) - lets us deterministically force
+    a beat on tick 0 and silence afterward, without a real FFT frame."""
+    clock = _FakeClock()
+    monkeypatch.setattr(ve_module.time, "perf_counter", clock.perf_counter)
+    monkeypatch.setattr(ve_module.time, "time", clock.time)
+
+    energies = iter(energy_sequence)
+    monkeypatch.setattr(ve_module, "band_energy", lambda frame, lo, hi: next(energies, 0.0))
+
+    # VisualizationEngine never reads config.devices - lamp identity/selection
+    # comes entirely from the (fake) LampManager below - so it's left empty.
+    config = AppConfig()
+    config.color_mapping.mode = "beat_sync"
+    bs = config.color_mapping.beat_sync
+    bs.sensitivity = 1.05
+    bs.min_interval_ms = 0.0
+    bs.min_energy = 0.0
+    bs.white_pulse_enabled = True
+    bs.white_pulse_probability = 1.0
+    bs.white_pulse_duration_ms = 80.0
+    bs.white_pulse_attack_ms = 5.0
+    bs.white_pulse_release_ms = 40.0
+    bs.white_pulse_true_white = True
+    bs.white_pulse_white_brightness = 1.0
+    bs.white_pulse_white_temp = 1.0
+    # Dark pulse would otherwise compete for the same beat (independent
+    # random roll) - disable it so the test is deterministic.
+    bs.dark_pulse_enabled = False
+
+    lamp_manager = _FakeLampManager(list(device_ids))
+    engine = VisualizationEngine(config, AudioCapture(), lamp_manager)
+    engine.running = True
+    engine._raw_frame = object()  # never read by band_energy, which is mocked
+    return engine, clock, lamp_manager
+
+
+def test_white_pulse_peak_sends_true_white_target(monkeypatch):
+    # BeatDetector needs >=4 history samples before it can fire at all (see
+    # dsp/beat_detector.py), so prime it with a few quiet samples first, then
+    # a strong spike well above that rolling average - which, with
+    # probability=1.0, always selects the white pulse. Ticks after that:
+    # silence, letting the pulse play out toward its peak.
+    engine, clock, lamp_manager = _make_engine(
+        monkeypatch, energy_sequence=[0.05, 0.05, 0.05, 0.05, 1.0] + [0.0] * 10
+    )
+
+    dt = 1.0 / 60.0
+    for _ in range(15):
+        engine.tick_visual()
+        clock.advance(dt)
+
+    assert lamp_manager.white_calls, "expected at least one push_white_targets() call during the pulse"
+    peak_targets = max(
+        (t for call in lamp_manager.white_calls for t in call.values()),
+        key=lambda t: t.brightness,
+    )
+    assert isinstance(peak_targets, WhiteTarget)
+    assert peak_targets.brightness > 0.9  # attack_ms=5ms is fast enough to reach ~full brightness in a few ticks
+    assert peak_targets.temp == 1.0  # coolest white, as configured
+
+
+def test_white_pulse_ends_and_resumes_rgb(monkeypatch):
+    engine, clock, lamp_manager = _make_engine(
+        monkeypatch, energy_sequence=[0.05, 0.05, 0.05, 0.05, 1.0] + [0.0] * 60
+    )
+
+    dt = 1.0 / 60.0
+    for _ in range(60):  # well past duration_ms(80) + release_ms(40) at 60fps
+        engine.tick_visual()
+        clock.advance(dt)
+
+    # The pulse must actually have happened (some white call with dev1)...
+    assert any("dev1" in targets for _kind, targets in lamp_manager.call_log if _kind == "white")
+    # ...but by the end, the lamp must be back on ordinary RGB colour sends,
+    # not still parked in WHITE work_mode: the LAST command issued for it,
+    # in call order, has to be a "color" one.
+    last_kind_for_dev1 = next(kind for kind, payload in reversed(lamp_manager.call_log) if "dev1" in payload)
+    assert last_kind_for_dev1 == "color"
+    assert "dev1" not in engine.latest_lamp_white_targets
+
+
+def test_rapid_repeated_beats_do_not_extend_pulse_forever(monkeypatch):
+    """Regression test: with white_pulse_probability=1.0 and a fast/dense
+    track (many beats in quick succession), an earlier version re-rolled and
+    re-extended the pulse's end time on EVERY qualifying beat, so a lamp
+    could get stuck in physical WHITE work_mode for the entire song instead
+    of a brief accent. A pulse must now run to completion (bounded by its
+    own duration + release) and let RGB resume even while beats keep
+    arriving - a new pulse can start again afterward, but the current one
+    can't be extended mid-flight."""
+    # 4 quiet priming samples, then a spike every OTHER tick for 2 full
+    # seconds (120 ticks @60fps) - far longer than duration_ms(80) +
+    # release_ms(40), so if the chaining bug were still present the lamp
+    # would still be on a white send at the end of this loop.
+    spikes = [0.05, 0.05, 0.05, 0.05] + [1.0, 0.0] * 60
+    engine, clock, lamp_manager = _make_engine(monkeypatch, energy_sequence=spikes)
+
+    dt = 1.0 / 60.0
+    for _ in range(120):
+        engine.tick_visual()
+        clock.advance(dt)
+
+    assert any("dev1" in targets for _kind, targets in lamp_manager.call_log if _kind == "white")
+    # Some push_colors call for dev1 must have happened AFTER the first
+    # white call for dev1 - i.e. it actually returned to RGB at least once
+    # during the barrage, rather than staying pinned to white the whole time.
+    first_white_index = next(
+        i for i, (kind, payload) in enumerate(lamp_manager.call_log) if kind == "white" and "dev1" in payload
+    )
+    assert any(
+        kind == "color" and "dev1" in payload
+        for kind, payload in lamp_manager.call_log[first_white_index + 1:]
+    )
+
+
+def test_true_white_flash_is_synchronized_across_phase_offsets(monkeypatch):
+    """Regression test: the true-white flash used to be sampled through each
+    lamp's own per-lamp phase offset, exactly like hue/brightness/saturation
+    are. Since the flash window is short, a lamp with a large enough offset
+    could sample a point in time just before/after the peak and miss the
+    white call entirely on a given beat - from the user's perspective, the
+    flash appeared to land on arbitrary/random lamps instead of hitting the
+    whole installation together. It must now be synchronized: every selected
+    lamp gets (or doesn't get) the white call on the same tick, regardless of
+    its own phase offset."""
+    device_ids = ["dev1", "dev2", "dev3"]
+    engine, clock, lamp_manager = _make_engine(
+        monkeypatch,
+        energy_sequence=[0.05, 0.05, 0.05, 0.05, 1.0] + [0.0] * 10,
+        device_ids=device_ids,
+    )
+    # Deliberately staggered, including offsets large relative to the short
+    # pulse (duration_ms=80 + attack_ms=5) - dev3's 300ms offset alone would
+    # have been enough to sample well outside the old pulse window entirely.
+    engine.config.per_lamp_effects["dev1"] = PerLampEffect(device_id="dev1", phase_offset_ms=0.0)
+    engine.config.per_lamp_effects["dev2"] = PerLampEffect(device_id="dev2", phase_offset_ms=120.0)
+    engine.config.per_lamp_effects["dev3"] = PerLampEffect(device_id="dev3", phase_offset_ms=300.0)
+
+    dt = 1.0 / 60.0
+    for _ in range(15):
+        engine.tick_visual()
+        clock.advance(dt)
+
+    white_call_device_sets = [frozenset(targets.keys()) for kind, targets in lamp_manager.call_log if kind == "white"]
+    assert white_call_device_sets, "expected at least one push_white_targets() call"
+    # Every white call must cover ALL three lamps together, never a subset -
+    # that's what "synchronized" means here.
+    for devices in white_call_device_sets:
+        assert devices == frozenset(device_ids), devices

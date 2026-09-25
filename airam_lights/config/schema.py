@@ -292,6 +292,29 @@ class BeatSyncModeConfig:
     white_pulse_attack_ms: float = 15.0  # how fast saturation snaps toward the extreme
     white_pulse_release_ms: float = 150.0  # how fast it settles back to the base saturation afterward
 
+    # "True white" pulses: instead of just desaturating the RGB color toward
+    # white (which on an RGB LED only ever approximates white, and reads as
+    # a fairly subtle accent), actually switch the lamp's physical WHITE
+    # work_mode on for the pulse's duration - the bulb's real white diode(s)
+    # at full intensity, a much more dramatic "flash to true white" accent -
+    # then switch back to RGB colour mode and resume wherever the normal
+    # Beat Sync hue/brightness envelope has evolved to in the meantime.
+    # Only applies when white_pulse_invert is off above (there's no physical
+    # "white work_mode, but fully saturated" - invert's RGB-domain blend is
+    # used instead in that case). Ignored while white_pulse_enabled is off.
+    # The lamp is sent ONE constant WHITE work_mode command on entry (not a
+    # per-tick brightness ramp) - white_pulse_attack_ms/release_ms above
+    # still govern the timing of when the flash starts/ends, just not a
+    # visible fade, since a real bulb needs two separate DP writes per
+    # white-mode command and every selected lamp flashes at once (see
+    # below) - a smooth ramp multiplied into a command burst large enough to
+    # overwhelm the LAN/Wi-Fi and tinytuya's own connection handling in
+    # practice, which looked like brightness never quite reaching its peak
+    # and inconsistent behavior between lamps.
+    white_pulse_true_white: bool = True
+    white_pulse_white_brightness: float = 1.0  # 0..1: brightness during the true-white flash
+    white_pulse_white_temp: float = 1.0  # 0..1, 0=warmest..1=coolest; 1.0 = coolest white
+
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -325,6 +348,9 @@ class BeatSyncModeConfig:
             white_pulse_depth=float(d.get("white_pulse_depth", 1.0)),
             white_pulse_attack_ms=float(d.get("white_pulse_attack_ms", 15.0)),
             white_pulse_release_ms=float(d.get("white_pulse_release_ms", 150.0)),
+            white_pulse_true_white=bool(d.get("white_pulse_true_white", True)),
+            white_pulse_white_brightness=float(d.get("white_pulse_white_brightness", 1.0)),
+            white_pulse_white_temp=float(d.get("white_pulse_white_temp", 1.0)),
         )
 
 

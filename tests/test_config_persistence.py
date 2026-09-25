@@ -60,6 +60,7 @@ def _build_fully_populated_config() -> AppConfig:
         dark_pulse_attack_ms=18.0, dark_pulse_release_ms=171.0, white_pulse_enabled=True,
         white_pulse_invert=True, white_pulse_probability=0.41, white_pulse_duration_ms=91.0,
         white_pulse_depth=0.71, white_pulse_attack_ms=17.0, white_pulse_release_ms=161.0,
+        white_pulse_true_white=False, white_pulse_white_brightness=0.61, white_pulse_white_temp=0.51,
     )
     peak_flash = PeakFlashModeConfig(
         detect_low_hz=21.0, detect_high_hz=16001.0, sensitivity=1.31, min_interval_ms=61.0,

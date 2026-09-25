@@ -323,6 +323,22 @@ class ColorMappingTab(QWidget):
         self.beat_white_pulse_invert_checkbox.toggled.connect(self._on_beat_changed)
         beat_layout.addWidget(self.beat_white_pulse_invert_checkbox)
 
+        self.beat_white_pulse_true_white_checkbox = QCheckBox(
+            "True white (switch the lamp's physical WHITE work_mode instead of just desaturating RGB)"
+        )
+        self.beat_white_pulse_true_white_checkbox.setChecked(bs.white_pulse_true_white)
+        self.beat_white_pulse_true_white_checkbox.setToolTip(
+            "Off: the pulse only desaturates/saturates the RGB color as described above - on an RGB "
+            "LED this only ever approximates white, so it tends to read as a fairly subtle accent. On "
+            "(default): at the pulse's peak, the lamp actually switches to its WHITE work_mode - the "
+            "real white diode(s) at White brightness/temp below - a much more dramatic flash, then "
+            "switches back to RGB colour mode afterward and resumes wherever the normal hue/brightness "
+            "envelope has evolved to in the meantime. Ignored (falls back to the RGB blend) while "
+            "Invert above is on, since there's no physical 'white work_mode, but fully saturated'."
+        )
+        self.beat_white_pulse_true_white_checkbox.toggled.connect(self._on_beat_changed)
+        beat_layout.addWidget(self.beat_white_pulse_true_white_checkbox)
+
         self.beat_white_pulse_prob_slider = FloatSlider(
             "White pulse probability", 0.0, 1.0, bs.white_pulse_probability, decimals=2,
             tooltip="Chance a given beat gets this saturation pulse - 0 = never, 1 = every beat.",
@@ -344,8 +360,19 @@ class ColorMappingTab(QWidget):
         )
         self.beat_white_pulse_release_slider = FloatSlider(
             "White pulse release", 10.0, 1000.0, bs.white_pulse_release_ms, decimals=0, suffix=" ms",
-            tooltip="How slowly saturation eases back to the base Saturation value once the pulse's "
-            "duration ends - higher means a longer visible fade back to normal color.",
+            tooltip="How slowly saturation (or, in True white mode, the WHITE work_mode's brightness) "
+            "eases back afterward - higher means a longer visible fade back to normal color.",
+        )
+        self.beat_white_pulse_white_brightness_slider = FloatSlider(
+            "White pulse brightness (True white)", 0.0, 1.0, bs.white_pulse_white_brightness, decimals=2,
+            tooltip="Only used when True white above is on - the lamp's brightness while it's switched "
+            "to WHITE work_mode at the pulse's peak. 1.0 = strongest possible intensity.",
+        )
+        self.beat_white_pulse_white_temp_slider = FloatSlider(
+            "White pulse temperature (True white)", 0.0, 1.0, bs.white_pulse_white_temp, decimals=2,
+            tooltip="Only used when True white above is on - color temperature during the WHITE "
+            "work_mode flash (0 = warmest, 1 = coolest). 1.0 (coolest white) tends to read as the "
+            "punchiest, most obviously 'flash' accent.",
         )
         for w in (
             self.beat_white_pulse_prob_slider,
@@ -353,6 +380,8 @@ class ColorMappingTab(QWidget):
             self.beat_white_pulse_depth_slider,
             self.beat_white_pulse_attack_slider,
             self.beat_white_pulse_release_slider,
+            self.beat_white_pulse_white_brightness_slider,
+            self.beat_white_pulse_white_temp_slider,
         ):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
@@ -666,6 +695,9 @@ class ColorMappingTab(QWidget):
         bs.white_pulse_depth = self.beat_white_pulse_depth_slider.value()
         bs.white_pulse_attack_ms = self.beat_white_pulse_attack_slider.value()
         bs.white_pulse_release_ms = self.beat_white_pulse_release_slider.value()
+        bs.white_pulse_true_white = self.beat_white_pulse_true_white_checkbox.isChecked()
+        bs.white_pulse_white_brightness = self.beat_white_pulse_white_brightness_slider.value()
+        bs.white_pulse_white_temp = self.beat_white_pulse_white_temp_slider.value()
         self.controller.apply_config_changes()
 
     def _on_beat_white_changed(self, *_args) -> None:
