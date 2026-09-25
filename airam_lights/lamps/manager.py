@@ -37,6 +37,16 @@ logger = logging.getLogger("airam_lights.lamps")
 # unsupported for the rest of this run - see the comment on that field.
 _WHITE_UNSUPPORTED_THRESHOLD = 5
 
+# After this many CONSECUTIVE failures of ANY kind (RGB colour or white -
+# see LampWorker._consecutive_failures), the worker rebuilds the tinytuya
+# connection from scratch (see LampDevice.reconnect()) instead of continuing
+# to retry over what may be a dead persistent socket. Deliberately higher
+# than _WHITE_UNSUPPORTED_THRESHOLD above - white-only failures should give
+# up on white specifically first, without necessarily meaning the whole
+# connection is dead, so this only fires once failures are clearly not
+# limited to just the white-mode DP layout issue that threshold covers.
+_RECONNECT_THRESHOLD = 8
+
 
 @dataclass
 class WorkerStats:
@@ -171,6 +181,32 @@ class LampWorker(threading.Thread):
         self.device.status.online = False
         self.device.status.last_error = str(e)
         logger.warning("Failed to send to '%s' (%s): %s", self.device.config.name, self.device.config.ip, e)
+
+        if self._consecutive_failures >= _RECONNECT_THRESHOLD:
+            # A bulb's persistent socket can silently die (Wi-Fi blip, the
+            # bulb itself dropping the connection) without tinytuya noticing
+            # or reconnecting on its own - every further send on that dead
+            # socket just keeps failing the same way forever. Previously the
+            # only fix was power-cycling the physical bulb (which forces it
+            # to accept a fresh connection); do the app-side equivalent
+            # instead - tear down and rebuild the tinytuya connection, then
+            # give this device a clean slate to try again with.
+            logger.warning(
+                "'%s' (%s) failed %d times in a row - reconnecting (rebuilding the connection)...",
+                self.device.config.name, self.device.config.ip, self._consecutive_failures,
+            )
+            self.device.reconnect()
+            self._consecutive_failures = 0
+            self._colour_mode_ensured = False
+            self._white_mode_ensured = False
+            self._last_sent_color = None
+            self._last_sent_white = None
+            # Also worth another shot at white specifically - a device given
+            # up on earlier may simply have been suffering from this same
+            # dead-connection problem the whole time, not a genuine per-bulb
+            # DP-layout incompatibility.
+            self._consecutive_white_failures = 0
+            self._white_unsupported = False
 
     def _send_color(self, color: Color) -> None:
         try:

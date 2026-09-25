@@ -1,4 +1,4 @@
-"""Verifies LampWorker's white-mode failure handling:
+"""Verifies LampWorker's failure handling:
 
 - the exponential backoff timer is actually engaged on failure (a past bug
   left it frozen, so a failing lamp retried at the engine's full push rate
@@ -8,15 +8,20 @@
   determine their DP value ranges, a per-device hardware/firmware
   difference, not a transient blip) gives up after a bounded number of
   consecutive failures instead of retrying/warning forever.
+- a device that keeps failing at ANYTHING (RGB colour included, not just
+  white) - e.g. a bulb whose persistent socket silently died - gets its
+  tinytuya connection rebuilt automatically instead of retrying forever
+  over a socket that's never coming back on its own (previously the only
+  fix was physically power-cycling the bulb).
 
 No real tinytuya device or network socket involved - LampDevice is replaced
 with a minimal fake exposing just the methods LampWorker calls.
 """
 from types import SimpleNamespace
 
-from airam_lights.color.models import WhiteTarget
+from airam_lights.color.models import Color, WhiteTarget
 from airam_lights.config.schema import NetworkConfig
-from airam_lights.lamps.manager import _WHITE_UNSUPPORTED_THRESHOLD, LampWorker
+from airam_lights.lamps.manager import _RECONNECT_THRESHOLD, _WHITE_UNSUPPORTED_THRESHOLD, LampWorker
 from airam_lights.lamps.tuya_device import LampStatus
 
 
@@ -27,6 +32,7 @@ class _AlwaysFailsWhiteDevice:
     def __init__(self):
         self.config = SimpleNamespace(name="Fake", ip="10.0.0.1")
         self.status = LampStatus()
+        self.reconnect_calls = 0
 
     def ensure_white_mode(self) -> None:
         pass
@@ -39,6 +45,41 @@ class _AlwaysFailsWhiteDevice:
 
     def set_color(self, r, g, b, wait_for_ack=False):
         return 5.0
+
+    def reconnect(self) -> None:
+        self.reconnect_calls += 1
+
+
+class _DeadConnectionDevice:
+    """Everything fails - RGB colour included - like a persistent socket
+    that's silently died. reconnect() flips a flag that makes subsequent
+    sends succeed again, simulating a fresh connection recovering it."""
+
+    def __init__(self):
+        self.config = SimpleNamespace(name="Fake", ip="10.0.0.1")
+        self.status = LampStatus()
+        self.reconnect_calls = 0
+        self._alive = False
+
+    def ensure_white_mode(self) -> None:
+        pass
+
+    def ensure_colour_mode(self) -> None:
+        pass
+
+    def set_white(self, brightness_percent, temp_percent, wait_for_ack=False):
+        if not self._alive:
+            raise ConnectionError("socket is not connected")
+        return 5.0
+
+    def set_color(self, r, g, b, wait_for_ack=False):
+        if not self._alive:
+            raise ConnectionError("socket is not connected")
+        return 5.0
+
+    def reconnect(self) -> None:
+        self.reconnect_calls += 1
+        self._alive = True
 
 
 def _make_worker(device) -> LampWorker:
@@ -80,3 +121,45 @@ def test_a_successful_white_send_resets_the_failure_streak():
     worker._send_white(WhiteTarget(brightness=1.0, temp=1.0))
     assert worker._consecutive_white_failures == 0
     assert worker._white_unsupported is False
+
+
+def test_reconnects_after_threshold_consecutive_failures_of_any_kind():
+    device = _DeadConnectionDevice()
+    worker = _make_worker(device)
+
+    # Alternate colour/white sends, like a real session would (RGB Beat
+    # Sync most of the time, white during a pulse) - both fail identically
+    # since the whole connection is "dead" here, not just one DP.
+    for i in range(_RECONNECT_THRESHOLD - 1):
+        if i % 2 == 0:
+            worker._send_color(Color(0.5, 0.5, 0.5))
+        else:
+            worker._send_white(WhiteTarget(brightness=1.0, temp=1.0))
+        assert device.reconnect_calls == 0, f"must not reconnect before the threshold (attempt {i + 1})"
+
+    worker._send_color(Color(0.5, 0.5, 0.5))
+    assert device.reconnect_calls == 1
+    assert worker._consecutive_failures == 0
+    assert worker._colour_mode_ensured is False
+    assert worker._white_mode_ensured is False
+
+    # The rebuilt connection ("power-cycle equivalent") must actually get
+    # used right away - the next send succeeds since _DeadConnectionDevice
+    # flips alive on reconnect(), proving the worker doesn't stay wedged.
+    worker._send_color(Color(0.5, 0.5, 0.5))
+    assert worker._consecutive_failures == 0
+    assert worker.stats.commands_sent == 1
+
+
+def test_reconnect_also_gives_white_a_fresh_chance():
+    device = _DeadConnectionDevice()
+    worker = _make_worker(device)
+    worker._white_unsupported = True
+    worker._consecutive_white_failures = _WHITE_UNSUPPORTED_THRESHOLD
+
+    for _ in range(_RECONNECT_THRESHOLD):
+        worker._send_color(Color(0.5, 0.5, 0.5))
+
+    assert device.reconnect_calls == 1
+    assert worker._white_unsupported is False
+    assert worker._consecutive_white_failures == 0

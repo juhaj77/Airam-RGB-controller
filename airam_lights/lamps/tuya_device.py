@@ -76,11 +76,27 @@ class LampDevice:
             # string here silently breaks its internal protocol-version comparisons,
             # which shows up as status()/set_colour() failing even with a correct
             # local_key - confirmed while testing against real Airam bulbs.
+            #
+            # connection_retry_limit/connection_retry_delay deliberately override
+            # tinytuya's own defaults (5 retries, 5s delay between each) down to a
+            # single, fast-failing attempt. With the defaults, ONE call against an
+            # unreachable/unresponsive bulb can block for ~30+ seconds (5 attempts
+            # x up to connection_timeout, plus 4x the retry delay in between) - and
+            # since that call runs synchronously on this device's own LampWorker
+            # thread, the whole thread (every command for THIS lamp, including
+            # reverting a true-white pulse back to RGB) is stuck for that entire
+            # window. LampWorker already has its own non-blocking, exponential
+            # backoff between attempts (see manager.py), so tinytuya retrying
+            # internally on top of that only adds a long, blocking pile-up for no
+            # benefit - let each individual attempt fail fast instead, and leave
+            # the actual retry pacing to our own layer.
             self._bulb = tinytuya.BulbDevice(
                 dev_id=self.config.id,
                 address=self.config.ip,
                 local_key=self.config.local_key,
                 version=float(self.config.version),
+                connection_retry_limit=1,
+                connection_retry_delay=0,
             )
             self._bulb.set_socketPersistent(True)
             self._bulb.set_socketTimeout(2.0)
@@ -92,6 +108,21 @@ class LampDevice:
         """Called when the user edits IP/local_key/version for this device."""
         self.config = config
         self._build()
+
+    def reconnect(self) -> None:
+        """Tears down and rebuilds the tinytuya connection (a fresh socket,
+        fresh detection state) without touching self.config. A bulb's
+        persistent socket (socketPersistent=True) can silently die - a
+        Wi-Fi blip, the bulb itself dropping the connection - and tinytuya
+        doesn't notice or reconnect on its own; every further send on that
+        dead socket just keeps failing until something forces a new one.
+        Called by LampWorker after enough CONSECUTIVE failures (see
+        LampWorker._consecutive_failures) - the same effective fix as power-
+        cycling the bulb, but from the app side, so a session doesn't need a
+        physical power-cycle to recover a stuck-offline lamp."""
+        with self._bulb_lock:
+            self._white_detect_attempted = False
+            self._build()
 
     # -- read ---------------------------------------------------------------
 
