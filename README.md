@@ -19,7 +19,9 @@ every lamp you own.
 > practice - a percussive flash-and-decay on every beat, optionally with **dark pulses**
 > (a rhythm-synced pause before the flash, off by default) and **white pulses** (a
 > hi-hat/cymbal-style accent, **on by default** with tuned timing - a real flash to the
-> bulb's physical WHITE work_mode at the pulse's peak, not just an RGB approximation),
+> **RGBCCT** bulb's dedicated white LEDs via its physical WHITE work_mode at the pulse's
+> peak, not just an RGB approximation, with warm and cool white flashes mixed in an
+> adjustable ratio rather than one fixed color temperature every time),
 > instead of the continuous, sometimes-muted blending the other modes do. It also ships
 > paired with the **Chase / Rotating Light overlay** enabled
 > by default, set to **complementary** color - a highlight that rotates through your
