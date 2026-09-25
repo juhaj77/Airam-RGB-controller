@@ -144,6 +144,12 @@ class VisualizationEngine:
         self._smoother_beat_white = AttackReleaseSmoother(bs.white_pulse_attack_ms, bs.white_pulse_release_ms)
         self._beat_dark_until: Optional[float] = None  # set while a dark-pulse pause is pending/active
         self._beat_white_pulse_until: Optional[float] = None  # set while a white-pulse hold is pending/active
+        # Warm (0.0) vs cool (1.0) for the CURRENT true-white flash - rolled
+        # fresh once per new flash (see white_pulse_cool_ratio), then held
+        # for that flash's whole duration, exactly like _beat_target_hue is
+        # for RGB hue - so it varies beat to beat instead of always looking
+        # the same, without flickering mid-flash.
+        self._beat_white_pulse_temp = 1.0
         # Last tick's smoothed white-pulse amount (see _smoother_beat_white
         # above and the comment on white_ready in _tick_beat_sync_mode) - a
         # new true-white flash may only START once the previous one has
@@ -523,6 +529,9 @@ class VisualizationEngine:
                 and random.random() < cfg.white_pulse_probability
             ):
                 self._beat_white_pulse_until = wall_now + cfg.white_pulse_duration_ms / 1000.0
+                # Warm vs cool for THIS flash, rolled once here (not per
+                # tick) so it stays constant for the flash's whole duration.
+                self._beat_white_pulse_temp = 1.0 if random.random() < cfg.white_pulse_cool_ratio else 0.0
 
         if self._beat_dark_until is not None and wall_now >= self._beat_dark_until:
             self._beat_dark_until = None
@@ -605,7 +614,7 @@ class VisualizationEngine:
         shared_white_target = (
             WhiteTarget(
                 brightness=cfg.white_pulse_white_brightness,
-                temp=cfg.white_pulse_white_temp,
+                temp=self._beat_white_pulse_temp,
             ).clamped()
             if use_true_white_now
             else None

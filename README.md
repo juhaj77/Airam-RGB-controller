@@ -342,9 +342,14 @@ expected rather than a bug.
 
 By default (`white_pulse_true_white`, on) this is a **"true white" flash**: at the pulse's
 peak the lamp actually switches its physical **WHITE work_mode** on - the real white
-diode(s), not an RGB approximation - at `white_pulse_white_brightness` (default 0.3) and
-`white_pulse_white_temp` (default 0.5, roughly neutral - push toward 1.0 for a colder,
-punchier accent), then switches back to RGB colour mode once the pulse ends and resumes
+diode(s), not an RGB approximation - at `white_pulse_white_brightness` (default 0.3).
+Each flash also independently rolls **warm vs. cool** white: `white_pulse_cool_ratio`
+(default 0.5) is the chance a given flash lands on cool white instead of warm (0.0 =
+always warm, 1.0 = always cool, 0.5 = a roughly even, unpredictable mix) - the roll happens
+once per new flash, tied to the same beat trigger as everything else in Beat Sync mode, and
+holds for that flash's whole duration rather than flickering mid-flight, so consecutive
+white accents read as varied instead of visually identical every time. It then switches
+back to RGB colour mode once the pulse ends and resumes
 wherever the normal Beat Sync hue/brightness envelope has evolved to in the meantime - the
 show continues exactly where it left off, it's just been briefly interrupted by a real
 white flash. Turn `white_pulse_true_white` off to fall back to the older, softer behavior

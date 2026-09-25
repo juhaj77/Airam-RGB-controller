@@ -45,7 +45,7 @@ class _FakeLampManager:
         self.call_log.append(("white", dict(targets)))
 
 
-def _make_engine(monkeypatch, *, energy_sequence, device_ids=("dev1",)):
+def _make_engine(monkeypatch, *, energy_sequence, device_ids=("dev1",), cool_ratio=1.0):
     """energy_sequence: values returned by band_energy() on successive
     calls (one per tick_visual() call) - lets us deterministically force
     a beat on tick 0 and silence afterward, without a real FFT frame."""
@@ -71,7 +71,7 @@ def _make_engine(monkeypatch, *, energy_sequence, device_ids=("dev1",)):
     bs.white_pulse_release_ms = 40.0
     bs.white_pulse_true_white = True
     bs.white_pulse_white_brightness = 1.0
-    bs.white_pulse_white_temp = 1.0
+    bs.white_pulse_cool_ratio = cool_ratio
     # Dark pulse would otherwise compete for the same beat (independent
     # random roll) - disable it so the test is deterministic.
     bs.dark_pulse_enabled = False
@@ -196,3 +196,56 @@ def test_true_white_flash_is_synchronized_across_phase_offsets(monkeypatch):
     # that's what "synchronized" means here.
     for devices in white_call_device_sets:
         assert devices == frozenset(device_ids), devices
+
+
+def test_white_pulse_cool_ratio_zero_is_always_warm(monkeypatch):
+    engine, clock, lamp_manager = _make_engine(
+        monkeypatch,
+        energy_sequence=[0.05, 0.05, 0.05, 0.05, 1.0] + [0.0] * 10,
+        cool_ratio=0.0,
+    )
+
+    dt = 1.0 / 60.0
+    for _ in range(15):
+        engine.tick_visual()
+        clock.advance(dt)
+
+    temps = {t.temp for _kind, targets in lamp_manager.call_log if _kind == "white" for t in targets.values()}
+    assert temps, "expected at least one white call"
+    assert temps == {0.0}, f"cool_ratio=0.0 must always land on warm (0.0), got {temps}"
+
+
+def test_white_pulse_cool_ratio_one_is_always_cool(monkeypatch):
+    engine, clock, lamp_manager = _make_engine(
+        monkeypatch,
+        energy_sequence=[0.05, 0.05, 0.05, 0.05, 1.0] + [0.0] * 10,
+        cool_ratio=1.0,
+    )
+
+    dt = 1.0 / 60.0
+    for _ in range(15):
+        engine.tick_visual()
+        clock.advance(dt)
+
+    temps = {t.temp for _kind, targets in lamp_manager.call_log if _kind == "white" for t in targets.values()}
+    assert temps, "expected at least one white call"
+    assert temps == {1.0}, f"cool_ratio=1.0 must always land on cool (1.0), got {temps}"
+
+
+def test_white_pulse_cool_ratio_stays_constant_within_one_flash(monkeypatch):
+    """The warm/cool roll happens once per NEW flash, not per tick - a
+    single flash must never flicker between warm and cool mid-duration."""
+    engine, clock, lamp_manager = _make_engine(
+        monkeypatch,
+        energy_sequence=[0.05, 0.05, 0.05, 0.05, 1.0] + [0.0] * 10,
+        cool_ratio=0.5,
+    )
+
+    dt = 1.0 / 60.0
+    for _ in range(15):
+        engine.tick_visual()
+        clock.advance(dt)
+
+    temps_seen = [t.temp for _kind, targets in lamp_manager.call_log if _kind == "white" for t in targets.values()]
+    assert temps_seen, "expected at least one white call"
+    assert len(set(temps_seen)) == 1, f"a single flash must not change temp mid-flight, saw {temps_seen}"

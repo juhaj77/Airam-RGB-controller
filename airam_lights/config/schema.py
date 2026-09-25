@@ -318,7 +318,14 @@ class BeatSyncModeConfig:
     # and inconsistent behavior between lamps.
     white_pulse_true_white: bool = True
     white_pulse_white_brightness: float = 0.3  # 0..1: brightness during the true-white flash
-    white_pulse_white_temp: float = 0.5  # 0..1, 0=warmest..1=coolest
+    # Each true-white flash independently rolls warm (0.0) vs cool (1.0) -
+    # this is the probability of landing on cool, not a fixed temperature -
+    # so at the 0.5 default flashes vary noticeably beat to beat instead of
+    # always looking the same, and the roll happens once per NEW flash (tied
+    # to Beat Sync's own trigger), not per-tick - see
+    # VisualizationEngine._beat_white_pulse_temp. 0.0 = always warm, 1.0 =
+    # always cool, same as before this became a ratio.
+    white_pulse_cool_ratio: float = 0.5
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -355,7 +362,7 @@ class BeatSyncModeConfig:
             white_pulse_release_ms=float(d.get("white_pulse_release_ms", 49.0)),
             white_pulse_true_white=bool(d.get("white_pulse_true_white", True)),
             white_pulse_white_brightness=float(d.get("white_pulse_white_brightness", 0.3)),
-            white_pulse_white_temp=float(d.get("white_pulse_white_temp", 0.5)),
+            white_pulse_cool_ratio=float(d.get("white_pulse_cool_ratio", 0.5)),
         )
 
 

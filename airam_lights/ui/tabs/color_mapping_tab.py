@@ -368,11 +368,13 @@ class ColorMappingTab(QWidget):
             tooltip="Only used when True white above is on - the lamp's brightness while it's switched "
             "to WHITE work_mode at the pulse's peak. 1.0 = strongest possible intensity.",
         )
-        self.beat_white_pulse_white_temp_slider = FloatSlider(
-            "White pulse temperature (True white)", 0.0, 1.0, bs.white_pulse_white_temp, decimals=2,
-            tooltip="Only used when True white above is on - color temperature during the WHITE "
-            "work_mode flash (0 = warmest, 1 = coolest). 1.0 (coolest white) tends to read as the "
-            "punchiest, most obviously 'flash' accent.",
+        self.beat_white_pulse_cool_ratio_slider = FloatSlider(
+            "White pulse cool ratio (True white)", 0.0, 1.0, bs.white_pulse_cool_ratio, decimals=2,
+            tooltip="Only used when True white above is on - each flash independently rolls warm vs "
+            "cool white using this as the chance of landing on cool, so flashes vary beat to beat "
+            "instead of always looking the same. 0.0 = always warm, 1.0 = always cool, 0.5 (default) = "
+            "a roughly even, unpredictable mix. The choice is made once per flash and held for its "
+            "whole duration, not re-rolled mid-flash.",
         )
         for w in (
             self.beat_white_pulse_prob_slider,
@@ -381,7 +383,7 @@ class ColorMappingTab(QWidget):
             self.beat_white_pulse_attack_slider,
             self.beat_white_pulse_release_slider,
             self.beat_white_pulse_white_brightness_slider,
-            self.beat_white_pulse_white_temp_slider,
+            self.beat_white_pulse_cool_ratio_slider,
         ):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
@@ -697,7 +699,7 @@ class ColorMappingTab(QWidget):
         bs.white_pulse_release_ms = self.beat_white_pulse_release_slider.value()
         bs.white_pulse_true_white = self.beat_white_pulse_true_white_checkbox.isChecked()
         bs.white_pulse_white_brightness = self.beat_white_pulse_white_brightness_slider.value()
-        bs.white_pulse_white_temp = self.beat_white_pulse_white_temp_slider.value()
+        bs.white_pulse_cool_ratio = self.beat_white_pulse_cool_ratio_slider.value()
         self.controller.apply_config_changes()
 
     def _on_beat_white_changed(self, *_args) -> None:
