@@ -232,6 +232,51 @@ def test_white_pulse_cool_ratio_one_is_always_cool(monkeypatch):
     assert temps == {1.0}, f"cool_ratio=1.0 must always land on cool (1.0), got {temps}"
 
 
+def test_dense_beats_still_force_a_periodic_rgb_only_window(monkeypatch):
+    """Regression test: the per-pulse cooldown gate only guarantees any ONE
+    pulse can't be extended/re-triggered early - it does not bound how long
+    a CHAIN of separate short pulses can keep the global true-white state
+    continuously active on a dense/fast track. In practice a lamp whose own
+    worker thread was rate-limited/backed off could then consistently miss
+    the brief gaps between chained pulses and never get a real turn to send
+    the reverted RGB color - indistinguishable from being stuck in white.
+    An absolute ceiling (_WHITE_MAX_CONTINUOUS_S) must force a real,
+    minimum-length RGB-only window (_WHITE_FORCED_GAP_S) periodically,
+    regardless of how densely beats keep arriving."""
+    # 4 quiet priming samples, then a spike on every other tick, continuously,
+    # for 6 simulated seconds - dense enough (with duration_ms=80/
+    # release_ms=40/probability=1.0, all from _make_engine's defaults) that
+    # pulses chain back to back almost the whole time.
+    spikes = [0.05, 0.05, 0.05, 0.05] + [1.0, 0.0] * 180
+    engine, clock, lamp_manager = _make_engine(monkeypatch, energy_sequence=spikes)
+
+    dt = 1.0 / 60.0
+    white_active_timeline = []  # (wall_time, was_white_active) per tick
+    for _ in range(360):  # 6 simulated seconds @ 60fps
+        engine.tick_visual()
+        white_active_timeline.append((clock.now, bool(engine.latest_lamp_white_targets)))
+        clock.advance(dt)
+
+    # Find the longest continuous stretch where white was NOT active.
+    longest_rgb_gap_s = 0.0
+    gap_start = None
+    for t, active in white_active_timeline:
+        if active:
+            gap_start = None
+        else:
+            if gap_start is None:
+                gap_start = t
+            longest_rgb_gap_s = max(longest_rgb_gap_s, t - gap_start)
+
+    # -dt*2 for sampling quantization (the gap is measured between sampled
+    # tick timestamps, not the true underlying window) and float drift from
+    # repeatedly summing dt - not a tolerance on the production behavior.
+    assert longest_rgb_gap_s >= ve_module._WHITE_FORCED_GAP_S - dt * 2, (
+        f"expected a forced RGB-only window of at least ~{ve_module._WHITE_FORCED_GAP_S}s, "
+        f"longest observed was {longest_rgb_gap_s:.3f}s"
+    )
+
+
 def test_white_pulse_cool_ratio_stays_constant_within_one_flash(monkeypatch):
     """The warm/cool roll happens once per NEW flash, not per tick - a
     single flash must never flicker between warm and cool mid-duration."""

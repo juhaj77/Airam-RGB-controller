@@ -22,4 +22,4 @@ logs/
 .pytest_cache/
 
 # Demo video - too large for GitHub's in-repo preview, hosted as a Release asset instead
-airam_final.mp4
+*.mp4

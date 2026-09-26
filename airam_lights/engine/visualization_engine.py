@@ -61,6 +61,29 @@ logger = logging.getLogger("airam_lights.engine")
 # pulse could never be considered "fully faded" enough to allow retriggering.
 _WHITE_PULSE_EPSILON = 0.02
 
+# Absolute safety ceiling on continuous true-white time, independent of any
+# single pulse's own duration/probability/cooldown settings. On a dense/fast
+# track, individually-short pulses can still chain closely enough that the
+# GLOBAL "white active" state stays true almost continuously for stretches -
+# each pulse is legitimately short, but a lamp whose own worker thread is
+# rate-limited/backed off (e.g. from an earlier unrelated send failure) can
+# consistently miss the brief RGB gaps between chained pulses and never
+# actually get a turn to send the "back to RGB" command, which looks
+# indistinguishable from being stuck. If continuous true-white time exceeds
+# this, the engine forces a real break - not just one skipped tick, but a
+# guaranteed minimum RGB-only window (_WHITE_FORCED_GAP_S) long enough that
+# even a lamp backed off to the worst case (16x its base send interval) gets
+# at least one real chance to see and send the reverted color.
+_WHITE_MAX_CONTINUOUS_S = 1.5
+_WHITE_FORCED_GAP_S = 1.0
+# A run of chained pulses has brief natural gaps between individual pulses
+# (the per-pulse cooldown in _tick_beat_sync_mode). Only a gap LONGER than
+# this counts as the chain having genuinely ended for _WHITE_MAX_CONTINUOUS_S
+# accounting purposes - otherwise those brief gaps would keep resetting the
+# continuous-time tracker before it could ever reach the ceiling, defeating
+# the whole point of it.
+_WHITE_CHAIN_GAP_TOLERANCE_S = 0.3
+
 
 class TimeSeriesBuffer:
     """Small history of (timestamp, vector) samples, used to implement the
@@ -156,6 +179,11 @@ class VisualizationEngine:
         # actually faded back out below _WHITE_PULSE_EPSILON, not merely
         # once _beat_white_pulse_until goes back to None.
         self._last_white_amount = 0.0
+        # See _WHITE_MAX_CONTINUOUS_S/_WHITE_FORCED_GAP_S/
+        # _WHITE_CHAIN_GAP_TOLERANCE_S above.
+        self._white_continuous_since: Optional[float] = None
+        self._white_last_active_at: Optional[float] = None
+        self._white_forced_gap_until: Optional[float] = None
         self.last_beat_time: Optional[float] = None
 
         pf = config.color_mapping.peak_flash
@@ -611,6 +639,42 @@ class VisualizationEngine:
         # one real send on entry and one on exit (reverting to RGB), exactly
         # like every other beat-triggered event in this app already works.
         use_true_white_now = use_true_white and white_amount > _WHITE_PULSE_EPSILON
+
+        # Absolute safety ceiling (see _WHITE_MAX_CONTINUOUS_S) - independent
+        # of the individual-pulse cooldown logic above, which only guarantees
+        # any ONE pulse can't be extended/re-triggered early; it does not
+        # bound how long a CHAIN of separate short pulses can keep the
+        # global "white active" state continuously true on a dense/fast
+        # track. Forces a real, minimum-length RGB-only window
+        # (_WHITE_FORCED_GAP_S) so every lamp - including one whose own
+        # worker thread is currently rate-limited/backed off - gets at least
+        # one real chance to see and send the reverted color, not just a
+        # single engine tick's worth of gap that a slow worker could easily
+        # never observe.
+        if use_true_white_now:
+            if self._white_forced_gap_until is not None and wall_now < self._white_forced_gap_until:
+                use_true_white_now = False
+            else:
+                self._white_forced_gap_until = None
+                # A brief gap between two chained pulses (the per-pulse
+                # cooldown above) does NOT count as the chain having ended -
+                # only a gap longer than _WHITE_CHAIN_GAP_TOLERANCE_S does.
+                # Without this, that natural inter-pulse gap would reset
+                # _white_continuous_since on every single pulse, so a long
+                # chain of short pulses could never actually reach the
+                # ceiling below.
+                if (
+                    self._white_continuous_since is None
+                    or self._white_last_active_at is None
+                    or (wall_now - self._white_last_active_at) > _WHITE_CHAIN_GAP_TOLERANCE_S
+                ):
+                    self._white_continuous_since = wall_now
+                self._white_last_active_at = wall_now
+                if wall_now - self._white_continuous_since > _WHITE_MAX_CONTINUOUS_S:
+                    use_true_white_now = False
+                    self._white_continuous_since = None
+                    self._white_forced_gap_until = wall_now + _WHITE_FORCED_GAP_S
+
         shared_white_target = (
             WhiteTarget(
                 brightness=cfg.white_pulse_white_brightness,

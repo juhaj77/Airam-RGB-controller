@@ -38,22 +38,30 @@ every lamp you own.
 > *things you still need to test* about your specific bulbs. This README assumes you
 > will run Phase 1 (below) against your real hardware before relying on anything else.
 
-## Demo video
+## Demo videos
 
-[Watch the demo video](https://github.com/juhaj77/Airam-RGB-controller/releases/download/v1.0-demo/airam_final.mp4)
-(hosted as a GitHub Release asset - GitHub's in-repo file viewer refuses to preview
-video files past a few MB, so it isn't committed directly into the repo) shows the app
-running against real hardware.
+Two demo videos show the app running against real hardware: **8 Airam spots**, 4 in the
+ceiling and 4 along the walls. Both are running in **Beat Sync** mode with **true white
+pulses** enabled.
 
-> **Heads up:** this was filmed on a phone, and the phone's camera continuously
+- [**Chase**](https://github.com/juhaj77/Airam-RGB-controller/releases/download/v1.0-demo/chase.mp4) -
+  a rotating complementary color chasing around all the spots.
+- [**Group**](https://github.com/juhaj77/Airam-RGB-controller/releases/download/v1.0-demo/group.mp4) -
+  the ceiling spots form one group and the wall spots another, with a complementary
+  color effect between the two groups.
+
+(The videos are hosted as GitHub Release assets - GitHub's in-repo file viewer refuses
+to preview video files past a few MB, so they aren't committed directly into the repo.)
+
+> **Heads up:** these were filmed on a phone, and the phone's camera continuously
 > auto-adjusts exposure and white balance while recording - it's constantly trying to
 > "correct" what it thinks is a color cast or an under/overexposed scene. That fights
-> directly against what the lights are actually doing, so the video **undersells the
+> directly against what the lights are actually doing, so the videos **undersell the
 > real effect**: color transitions look laggier/smoother than they are (the camera is
 > chasing them), whites and saturated hues can look shifted or washed out, and fast
 > brightness changes (e.g. Beat Sync flashes) get flattened as the camera's exposure
 > hunts to compensate. In person, colors are more saturated, whites are actually white,
-> and the beat-synced flashes/pulses are far snappier than the video suggests. If your
+> and the beat-synced flashes/pulses are far snappier than the videos suggest. If your
 > phone lets you lock AE/AWB (exposure and white balance) before recording, that will
 > get you a much more accurate capture.
 
@@ -354,7 +362,11 @@ white accents read as varied instead of visually identical every time. It then s
 back to RGB colour mode once the pulse ends and resumes
 wherever the normal Beat Sync hue/brightness envelope has evolved to in the meantime - the
 show continues exactly where it left off, it's just been briefly interrupted by a real
-white flash. Turn `white_pulse_true_white` off to fall back to the older, softer behavior
+white flash. On a dense/fast track, several short flashes can chain closely enough that
+the lamps would otherwise stay in WHITE work_mode almost continuously for a stretch - a
+hard safety ceiling forces a real, guaranteed-length RGB-only window at least every 1.5s
+of continuous white time, so a lamp can never end up looking stuck in white regardless of
+how the beats line up. Turn `white_pulse_true_white` off to fall back to the older, softer behavior
 instead: desaturating the RGB color toward white in place (or, with `white_pulse_invert`,
 saturating toward a fully vivid color instead - useful if your base `saturation` is already
 fairly pastel) rather than actually switching work_mode - also what always happens when
