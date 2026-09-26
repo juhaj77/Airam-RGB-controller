@@ -157,6 +157,7 @@ class ManualChaseTab(QWidget):
 
         root.addWidget(box)
 
+        self._populated_lamps = None
         controller.lampsChanged.connect(self._populate_table)
         self._populate_table()
 
@@ -164,6 +165,14 @@ class ManualChaseTab(QWidget):
 
     def _populate_table(self) -> None:
         devices = list(self.controller.lamp_manager.devices.values())
+        # lampsChanged also fires every few seconds from the periodic lamp
+        # status refresh - rebuilding the cell widgets then would destroy a
+        # spinbox mid-edit (focus lost, typed text gone), so only rebuild
+        # when the lamp list itself has actually changed.
+        lamps = [(dev.config.id, dev.config.name) for dev in devices]
+        if lamps == self._populated_lamps:
+            return
+        self._populated_lamps = lamps
         self.table.setRowCount(len(devices))
         for row, dev in enumerate(devices):
             effect = self.controller.get_or_create_effect(dev.config.id)

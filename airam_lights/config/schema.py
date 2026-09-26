@@ -317,6 +317,14 @@ class BeatSyncModeConfig:
     # practice, which looked like brightness never quite reaching its peak
     # and inconsistent behavior between lamps.
     white_pulse_true_white: bool = True
+    # Which lamps a true-white flash lands on: "all" (default) = every
+    # selected lamp at once, as before; "chase" = only the lamps the Chase
+    # effect's moving highlight is currently on; "group" = only the lamps in
+    # Group Switch's currently active group. The set is captured on the
+    # flash's first tick and held for its whole duration. Falls back to
+    # "all" when the chosen effect isn't enabled/has fewer than 2 positions,
+    # since there's then no moving highlight to follow.
+    white_pulse_target: str = "all"
     white_pulse_white_brightness: float = 0.3  # 0..1: brightness during the true-white flash
     # Each true-white flash independently rolls warm (0.0) vs cool (1.0) -
     # this is the probability of landing on cool, not a fixed temperature -
@@ -361,6 +369,7 @@ class BeatSyncModeConfig:
             white_pulse_attack_ms=float(d.get("white_pulse_attack_ms", 17.0)),
             white_pulse_release_ms=float(d.get("white_pulse_release_ms", 49.0)),
             white_pulse_true_white=bool(d.get("white_pulse_true_white", True)),
+            white_pulse_target=d.get("white_pulse_target", "all"),
             white_pulse_white_brightness=float(d.get("white_pulse_white_brightness", 0.3)),
             white_pulse_cool_ratio=float(d.get("white_pulse_cool_ratio", 0.5)),
         )
@@ -596,6 +605,12 @@ class PerLampEffect:
     # Same "0-based, ascending, same-number lamps grouped together" rule as
     # chase_order; None = not part of any group switch group.
     effect_group: Optional[int] = None
+    # Multiplier on BeatSyncModeConfig.white_pulse_white_brightness for this
+    # lamp's true-white flashes - e.g. 0.5 to tone down a group of spots
+    # that sits close to plants/walls and reads much brighter than the
+    # rest. A ratio rather than an absolute cap, so the balance between
+    # lamps holds when the global brightness is changed. 1.0 = unchanged.
+    white_pulse_brightness_mult: float = 1.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -614,6 +629,7 @@ class PerLampEffect:
             chase_order=d.get("chase_order", None),
             chase_dwell_mult=float(d.get("chase_dwell_mult", 1.0)),
             effect_group=d.get("effect_group", None),
+            white_pulse_brightness_mult=float(d.get("white_pulse_brightness_mult", 1.0)),
         )
 
 

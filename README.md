@@ -40,8 +40,8 @@ every lamp you own.
 
 ## Demo videos
 
-Two demo videos show the app running against real hardware: **8 Airam spots**, 4 in the
-ceiling and 4 along the walls. Both are running in **Beat Sync** mode with **true white
+Three demo videos show the app running against real hardware: **8 Airam spots**, 4 in the
+ceiling and 4 along the walls. All are running in **Beat Sync** mode with **true white
 pulses** enabled.
 
 - [**Chase**](https://github.com/juhaj77/Airam-RGB-controller/releases/download/v1.0-demo/chase.mp4) -
@@ -49,14 +49,19 @@ pulses** enabled.
 - [**Group**](https://github.com/juhaj77/Airam-RGB-controller/releases/download/v1.0-demo/group.mp4) -
   the ceiling spots form one group and the wall spots another, with a complementary
   color effect between the two groups.
+- [**3 groups**](https://github.com/juhaj77/Airam-RGB-controller/releases/download/v1.0-demo/3_groups_demo.mp4) -
+  the spots are split into **three groups**. Unlike the two videos above, this one was
+  filmed on a **Xiaomi 14T in Pro mode with fixed white balance and fixed ISO**, so the
+  camera isn't fighting the lights (see the note below) - it's a much more faithful
+  capture of the actual colors and the snappiness of the beat-synced flashes/pulses.
 
 (The videos are hosted as GitHub Release assets - GitHub's in-repo file viewer refuses
 to preview video files past a few MB, so they aren't committed directly into the repo.)
 
-> **Heads up:** these were filmed on a phone, and the phone's camera continuously
-> auto-adjusts exposure and white balance while recording - it's constantly trying to
-> "correct" what it thinks is a color cast or an under/overexposed scene. That fights
-> directly against what the lights are actually doing, so the videos **undersell the
+> **Heads up:** the Chase and Group videos were filmed on a phone in auto mode, and the
+> phone's camera continuously auto-adjusts exposure and white balance while recording -
+> it's constantly trying to "correct" what it thinks is a color cast or an
+> under/overexposed scene. That fights directly against what the lights are actually doing, so the videos **undersell the
 > real effect**: color transitions look laggier/smoother than they are (the camera is
 > chasing them), whites and saturated hues can look shifted or washed out, and fast
 > brightness changes (e.g. Beat Sync flashes) get flattened as the camera's exposure
@@ -366,7 +371,15 @@ white flash. On a dense/fast track, several short flashes can chain closely enou
 the lamps would otherwise stay in WHITE work_mode almost continuously for a stretch - a
 hard safety ceiling forces a real, guaranteed-length RGB-only window at least every 1.5s
 of continuous white time, so a lamp can never end up looking stuck in white regardless of
-how the beats line up. Turn `white_pulse_true_white` off to fall back to the older, softer behavior
+how the beats line up. By default every selected lamp flashes white together;
+`white_pulse_target` (**True white lamps** in the UI) can instead limit the flash to just
+the lamps the **Chase** highlight is currently on (`chase`) or to Group Switch's currently
+active group (`group`) - the lamps are picked when the flash starts and held for its
+duration, and it falls back to all lamps if that effect isn't enabled. The per-lamp
+**True white x** column (`white_pulse_brightness_mult`) scales an individual lamp's
+true-white brightness relative to the global setting (0.5 = half) - give every lamp in a
+group the same value to balance, say, wall spots next to plants against the ceiling group;
+the ratio holds when you change the global brightness. Turn `white_pulse_true_white` off to fall back to the older, softer behavior
 instead: desaturating the RGB color toward white in place (or, with `white_pulse_invert`,
 saturating toward a fully vivid color instead - useful if your base `saturation` is already
 fairly pastel) rather than actually switching work_mode - also what always happens when

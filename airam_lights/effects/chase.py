@@ -8,7 +8,7 @@ benefits both places at once instead of drifting apart.
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Set
 
 from ..color.models import Color, WhiteTarget, circular_lerp_deg, clip, lerp
 from ..config.schema import ChaseEffectConfig, GroupSwitchEffectConfig, PerLampEffect, WhiteChaseEffectConfig
@@ -250,6 +250,22 @@ class ChaseAnimator:
         self._sweep_end = self._position + delta
         self._position = self._sweep_end % n  # bypass the setter: keep the sweep just computed
 
+    def active_device_ids(self, groups: List[List[str]]) -> Set[str]:
+        """The lamps the highlight is currently on: for each rotator, the
+        group nearest its current position (not the swept arc - this is
+        "where it is now", used e.g. to target Beat Sync's true-white flash
+        at just the moving lamps)."""
+        n = len(groups)
+        if n == 0:
+            return set()
+        num_rotators = max(1, int(self.config.num_rotators))
+        spacing = n / num_rotators
+        active: Set[str] = set()
+        for k in range(num_rotators):
+            index = int(round(self._position + k * spacing)) % n
+            active.update(groups[index])
+        return active
+
     def apply(self, colors: Dict[str, Color], groups: List[List[str]]) -> Dict[str, Color]:
         """Renders the current position onto `colors`, returning a new dict.
         Brightness is always a multiplicative boost on each lamp's own
@@ -454,6 +470,12 @@ class GroupSwitchAnimator:
             delta = direction * steps_per_s * dt
 
         self.position = (self.position + delta) % n
+
+    def active_device_ids(self, groups: List[List[str]]) -> Set[str]:
+        """The lamps in the currently active group (same index apply() uses)."""
+        if not groups:
+            return set()
+        return set(groups[int(math.floor(self.position)) % len(groups)])
 
     def apply(self, colors: Dict[str, Color], groups: List[List[str]]) -> Dict[str, Color]:
         """Renders the current active group onto `colors`. Brightness is,

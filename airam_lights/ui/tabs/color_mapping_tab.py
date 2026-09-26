@@ -342,6 +342,23 @@ class ColorMappingTab(QWidget):
         self.beat_white_pulse_true_white_checkbox.toggled.connect(self._on_beat_changed)
         beat_layout.addWidget(self.beat_white_pulse_true_white_checkbox)
 
+        white_target_row = QHBoxLayout()
+        white_target_row.addWidget(QLabel("True white lamps:"))
+        self.beat_white_pulse_target_combo = QComboBox()
+        self.beat_white_pulse_target_combo.addItems(["all", "chase", "group"])
+        self.beat_white_pulse_target_combo.setCurrentText(bs.white_pulse_target)
+        self.beat_white_pulse_target_combo.setToolTip(
+            "Only used when True white above is on - which lamps a true-white flash lands on. all "
+            "(default): every selected lamp at once. chase: only the lamps the Chase effect's moving "
+            "highlight is on at that moment. group: only the lamps in Group Switch's currently active "
+            "group. The lamps are picked when the flash starts and kept for its whole duration. If the "
+            "chosen effect isn't enabled (or has fewer than 2 positions), falls back to all lamps."
+        )
+        self.beat_white_pulse_target_combo.currentTextChanged.connect(self._on_beat_changed)
+        white_target_row.addWidget(self.beat_white_pulse_target_combo)
+        white_target_row.addStretch(1)
+        beat_layout.addLayout(white_target_row)
+
         self.beat_white_pulse_prob_slider = FloatSlider(
             "White pulse probability", 0.0, 1.0, bs.white_pulse_probability, decimals=2,
             tooltip="Chance a given beat gets this saturation pulse - 0 = never, 1 = every beat.",
@@ -716,6 +733,7 @@ class ColorMappingTab(QWidget):
         bs.white_pulse_attack_ms = self.beat_white_pulse_attack_slider.value()
         bs.white_pulse_release_ms = self.beat_white_pulse_release_slider.value()
         bs.white_pulse_true_white = self.beat_white_pulse_true_white_checkbox.isChecked()
+        bs.white_pulse_target = self.beat_white_pulse_target_combo.currentText()
         bs.white_pulse_white_brightness = self.beat_white_pulse_white_brightness_slider.value()
         bs.white_pulse_cool_ratio = self.beat_white_pulse_cool_ratio_slider.value()
         self.controller.apply_config_changes()

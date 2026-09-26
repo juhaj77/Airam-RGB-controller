@@ -28,7 +28,7 @@ import math
 import random
 import threading
 import time
-from typing import Deque, Dict, Optional, Tuple
+from typing import Deque, Dict, Optional, Set, Tuple
 
 import numpy as np
 
@@ -231,6 +231,11 @@ class VisualizationEngine:
         # reset to {} at the top of every tick_visual() so a stale entry can
         # never survive into a tick where the mode has since changed.
         self._beat_sync_white_targets: Dict[str, WhiteTarget] = {}
+        # Lamps the current true-white flash was restricted to (see
+        # BeatSyncModeConfig.white_pulse_target) - captured on the flash's
+        # first tick and held until it ends, so a chase stepping on mid-flash
+        # doesn't turn it into a burst of white on/off commands.
+        self._white_pulse_lamps: Optional[Set[str]] = None
 
     # -- configuration -----------------------------------------------------------
 
@@ -348,6 +353,7 @@ class VisualizationEngine:
             # apply here (it operates on hue/saturation, meaningless for a
             # white-balance value); WhiteChaseAnimator is a separate effect
             # used by the standalone manual app instead.
+            self._white_pulse_lamps = None
             white_targets, preview_colors = self._tick_beat_sync_white_mode(frame, dt, wall_now, selected_ids)
             self.latest_lamp_white_targets = white_targets
             self.latest_lamp_colors = preview_colors  # UI-swatch approximation only
@@ -376,6 +382,8 @@ class VisualizationEngine:
         if colors and self.config.group_switch.enabled:
             colors = self._apply_group_switch_overlay(colors, frame, dt, wall_now, selected_ids)
 
+        self._restrict_white_targets_to_moving_lamps(selected_ids)
+
         if self._beat_sync_white_targets:
             # Some lamps are mid true-white flash this tick (Beat Sync mode
             # only) - split them out so each lamp gets exactly one command
@@ -395,6 +403,31 @@ class VisualizationEngine:
             self.latest_lamp_white_targets = {}
             if colors:
                 self.lamp_manager.push_colors(colors)
+
+    def _restrict_white_targets_to_moving_lamps(self, selected_ids) -> None:
+        """Applies BeatSyncModeConfig.white_pulse_target: narrows this tick's
+        true-white targets down to the lamps Chase's highlight / Group
+        Switch's active group is on. Runs after the overlays have ticked, so
+        it sees their current position."""
+        if not self._beat_sync_white_targets:
+            self._white_pulse_lamps = None
+            return
+        target = self.config.color_mapping.beat_sync.white_pulse_target
+        if self._white_pulse_lamps is None:
+            lamps: Optional[Set[str]] = None
+            if target == "chase" and self.config.chase.enabled:
+                groups = get_chase_groups(self.config.per_lamp_effects, selected_ids)
+                if len(groups) >= 2:
+                    lamps = self._chase_animator.active_device_ids(groups)
+            elif target == "group" and self.config.group_switch.enabled:
+                groups = get_group_switch_groups(self.config.per_lamp_effects, selected_ids)
+                if len(groups) >= 2:
+                    lamps = self._group_switch_animator.active_device_ids(groups)
+            # None = "all" (or the chosen effect has no highlight to follow)
+            self._white_pulse_lamps = lamps if lamps is not None else set(self._beat_sync_white_targets)
+        self._beat_sync_white_targets = {
+            k: v for k, v in self._beat_sync_white_targets.items() if k in self._white_pulse_lamps
+        }
 
     # -- per-mode implementations ---------------------------------------------------
 
@@ -695,7 +728,13 @@ class VisualizationEngine:
             mult = effect.sensitivity_mult if effect else 1.0
 
             if shared_white_target is not None:
-                white_targets[device_id] = shared_white_target
+                if effect is not None and effect.white_pulse_brightness_mult != 1.0:
+                    white_targets[device_id] = WhiteTarget(
+                        brightness=shared_white_target.brightness * effect.white_pulse_brightness_mult,
+                        temp=shared_white_target.temp,
+                    ).clamped()
+                else:
+                    white_targets[device_id] = shared_white_target
 
             color = self.color_engine.compute_beat_sync(vals[0], vals[2], clip(vals[1] * mult))
             if effect is not None:

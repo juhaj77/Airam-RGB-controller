@@ -50,6 +50,38 @@ _EFFECT_COLUMNS = [
     "Chase order",
     "Chase dwell x",
     "Effect group",
+    "True white x",
+]
+# Header tooltips, same order as _EFFECT_COLUMNS.
+_EFFECT_COLUMN_TOOLTIPS = [
+    "The lamp's name (set on the Devices tab).",
+    "8-Band Spectrum mode only: which frequency band this lamp shows. Auto = assigned in "
+    "selection order.",
+    "Delays this lamp's reaction by this many milliseconds relative to the music, so lamps "
+    "with staggered offsets form a wave. Beat Sync's true-white flash ignores it (always "
+    "synchronized).",
+    "Multiplies this lamp's final output brightness, after the color mode has done its work "
+    "- 0.5 = half as bright, 1.0 = unchanged. Use it to balance a lamp that's physically "
+    "brighter/closer than the others.",
+    "Multiplies this lamp's color saturation - below 1.0 = more pastel/whiter, above 1.0 = "
+    "more vivid (up to fully saturated).",
+    "Rotates this lamp's hue around the color wheel by this many degrees, e.g. 180 = always "
+    "the opposite color of the rest.",
+    "Multiplies the music-driven level going INTO the color mode (input gain), before it's "
+    "turned into a color - above 1.0 = this lamp reacts more strongly to quieter sounds and "
+    "reaches its peak sooner, below 1.0 = it reacts less. Unlike Brightness x, which just "
+    "scales the finished output. (In RGB Frequency / 8-Band modes it's applied together "
+    "with the per-band gains.)",
+    "This lamp's position in the Chase overlay's rotation, 0-based. Lamps with the same "
+    "number light up together as one position. Off = not part of the chase.",
+    "How long the Chase highlight lingers at this lamp's position relative to others - "
+    "lower it for a position with several lamps (e.g. a multi-spot ceiling fixture) if the "
+    "highlight seems to dwell there too long. 1.0 = default.",
+    "This lamp's group for the Group Switch overlay (independent of Chase order). Lamps with "
+    "the same number switch together. Off = not part of any group.",
+    "Multiplies Beat Sync's true-white flash brightness for this lamp - 0.5 = half, 1.0 = "
+    "unchanged. Give every lamp in a group the same value to balance groups against each "
+    "other (e.g. wall spots vs. ceiling).",
 ]
 
 
@@ -148,12 +180,16 @@ class BandModeTab(QWidget):
             "at once, e.g. a multi-spot ceiling fixture, if the highlight feels like it's "
             "dwelling there too long) - and 'Effect group', a separate, independent grouping "
             "used by the Group Switch tab (a lamp can have a Chase order, an Effect group, "
-            "both, or neither)."
+            "both, or neither). 'True white x' multiplies the Beat Sync true-white flash "
+            "brightness for this lamp (1.0 = unchanged, 0.5 = half) - give every lamp in a group "
+            "the same value to balance e.g. wall spots against the ceiling group."
         )
         effects_label.setWordWrap(True)
         effects_layout.addWidget(effects_label)
         self.effects_table = QTableWidget(0, len(_EFFECT_COLUMNS))
         self.effects_table.setHorizontalHeaderLabels(_EFFECT_COLUMNS)
+        for col, tooltip in enumerate(_EFFECT_COLUMN_TOOLTIPS):
+            self.effects_table.horizontalHeaderItem(col).setToolTip(tooltip)
         self.effects_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         # With this many columns, equal-share Stretch can squeeze a numeric
         # column below the width a spinbox needs to show its up/down
@@ -688,6 +724,7 @@ class BandModeTab(QWidget):
 
         group_switch_root.addWidget(gs_box)
 
+        self._populated_lamps = None
         controller.lampsChanged.connect(self._populate_effects_table)
         self._populate_effects_table()
 
@@ -743,6 +780,14 @@ class BandModeTab(QWidget):
 
     def _populate_effects_table(self) -> None:
         devices = list(self.controller.lamp_manager.devices.values())
+        # lampsChanged also fires every few seconds from the periodic lamp
+        # status refresh - rebuilding the cell widgets then would destroy a
+        # spinbox mid-edit (focus lost, typed text gone), so only rebuild
+        # when the lamp list itself has actually changed.
+        lamps = [(dev.config.id, dev.config.name) for dev in devices]
+        if lamps == self._populated_lamps:
+            return
+        self._populated_lamps = lamps
         self.effects_table.setRowCount(len(devices))
         num_bands = len(self.controller.config.bands_8)
 
@@ -764,10 +809,10 @@ class BandModeTab(QWidget):
             band_combo.currentIndexChanged.connect(lambda _i, d=dev.config.id, c=band_combo: self._on_effect_changed(d, "band_index", c.currentData()))
             self.effects_table.setCellWidget(row, 1, band_combo)
 
-            self._add_spin(row, 2, dev.config.id, "phase_offset_ms", -500.0, 500.0, effect.phase_offset_ms)
+            self._add_spin(row, 2, dev.config.id, "phase_offset_ms", -500.0, 500.0, effect.phase_offset_ms, step=5.0)
             self._add_spin(row, 3, dev.config.id, "brightness_mult", 0.0, 2.0, effect.brightness_mult)
             self._add_spin(row, 4, dev.config.id, "saturation_mult", 0.0, 2.0, effect.saturation_mult)
-            self._add_spin(row, 5, dev.config.id, "hue_offset_deg", -180.0, 180.0, effect.hue_offset_deg)
+            self._add_spin(row, 5, dev.config.id, "hue_offset_deg", -180.0, 180.0, effect.hue_offset_deg, step=5.0)
             self._add_spin(row, 6, dev.config.id, "sensitivity_mult", 0.0, 2.0, effect.sensitivity_mult)
 
             chase_spin = QSpinBox()
@@ -790,10 +835,17 @@ class BandModeTab(QWidget):
             )
             self.effects_table.setCellWidget(row, 9, group_spin)
 
-    def _add_spin(self, row: int, col: int, device_id: str, attr: str, lo: float, hi: float, value: float) -> None:
+            self._add_spin(
+                row, 10, dev.config.id, "white_pulse_brightness_mult", 0.0, 2.0, effect.white_pulse_brightness_mult
+            )
+
+    def _add_spin(
+        self, row: int, col: int, device_id: str, attr: str, lo: float, hi: float, value: float, step: float = 0.05
+    ) -> None:
         spin = QDoubleSpinBox()
         spin.setRange(lo, hi)
         spin.setDecimals(2)
+        spin.setSingleStep(step)
         spin.setValue(value)
         # Explicit (Qt's default already, but stated here so it's obvious and
         # never silently lost) - these are always visibly clickable, not just

@@ -294,3 +294,93 @@ def test_white_pulse_cool_ratio_stays_constant_within_one_flash(monkeypatch):
     temps_seen = [t.temp for _kind, targets in lamp_manager.call_log if _kind == "white" for t in targets.values()]
     assert temps_seen, "expected at least one white call"
     assert len(set(temps_seen)) == 1, f"a single flash must not change temp mid-flight, saw {temps_seen}"
+
+
+def _white_device_sets(lamp_manager):
+    return [frozenset(targets.keys()) for kind, targets in lamp_manager.call_log if kind == "white"]
+
+
+def _run_one_flash(engine, clock, ticks=15):
+    dt = 1.0 / 60.0
+    for _ in range(ticks):
+        engine.tick_visual()
+        clock.advance(dt)
+
+
+def _make_targeted_engine(monkeypatch, target):
+    engine, clock, lamp_manager = _make_engine(
+        monkeypatch,
+        energy_sequence=[0.05, 0.05, 0.05, 0.05, 1.0] + [0.0] * 20,
+        device_ids=["dev1", "dev2", "dev3", "dev4"],
+    )
+    engine.config.color_mapping.beat_sync.white_pulse_target = target
+    # Chase ring: dev1/dev2 are position 0, dev3 position 1, dev4 position 2.
+    # Group switch: dev1/dev3 group 0, dev2/dev4 group 1.
+    for device_id, order, group in (("dev1", 0, 0), ("dev2", 0, 1), ("dev3", 1, 0), ("dev4", 2, 1)):
+        engine.config.per_lamp_effects[device_id] = PerLampEffect(
+            device_id=device_id, chase_order=order, effect_group=group
+        )
+    for effect_cfg in (engine.config.chase, engine.config.group_switch):
+        effect_cfg.sync_mode = "off"
+        effect_cfg.speed_rotations_per_s = 0.0  # parked on position/group 0
+    return engine, clock, lamp_manager
+
+
+def test_white_pulse_target_chase_only_hits_chase_highlight(monkeypatch):
+    engine, clock, lamp_manager = _make_targeted_engine(monkeypatch, "chase")
+    engine.config.chase.enabled = True
+    _run_one_flash(engine, clock)
+
+    sets = _white_device_sets(lamp_manager)
+    assert sets
+    assert all(devices == frozenset({"dev1", "dev2"}) for devices in sets), sets
+
+
+def test_white_pulse_target_group_only_hits_active_group(monkeypatch):
+    engine, clock, lamp_manager = _make_targeted_engine(monkeypatch, "group")
+    engine.config.group_switch.enabled = True
+    _run_one_flash(engine, clock)
+
+    sets = _white_device_sets(lamp_manager)
+    assert sets
+    assert all(devices == frozenset({"dev1", "dev3"}) for devices in sets), sets
+
+
+def test_white_pulse_target_falls_back_to_all_when_effect_disabled(monkeypatch):
+    engine, clock, lamp_manager = _make_targeted_engine(monkeypatch, "chase")
+    engine.config.chase.enabled = False
+    _run_one_flash(engine, clock)
+
+    sets = _white_device_sets(lamp_manager)
+    assert sets
+    assert all(devices == frozenset({"dev1", "dev2", "dev3", "dev4"}) for devices in sets), sets
+
+
+def test_white_pulse_target_lamps_are_held_for_the_whole_flash(monkeypatch):
+    """The chase stepping on mid-flash must not move the white flash along
+    with it - the lamps are picked on the flash's first tick and held."""
+    engine, clock, lamp_manager = _make_targeted_engine(monkeypatch, "chase")
+    engine.config.chase.enabled = True
+    engine.config.chase.speed_rotations_per_s = 20.0  # several steps within one flash
+    _run_one_flash(engine, clock)
+
+    sets = _white_device_sets(lamp_manager)
+    assert sets
+    assert len(set(sets)) == 1, sets
+
+
+def test_white_pulse_brightness_mult_scales_per_lamp(monkeypatch):
+    engine, clock, lamp_manager = _make_targeted_engine(monkeypatch, "all")
+    engine.config.color_mapping.beat_sync.white_pulse_white_brightness = 0.8
+    engine.config.per_lamp_effects["dev3"].white_pulse_brightness_mult = 0.5
+    engine.config.per_lamp_effects["dev4"].white_pulse_brightness_mult = 0.5
+    _run_one_flash(engine, clock)
+
+    white_calls = [targets for kind, targets in lamp_manager.call_log if kind == "white"]
+    assert white_calls
+    for targets in white_calls:
+        assert targets["dev1"].brightness == 0.8
+        assert targets["dev2"].brightness == 0.8
+        assert abs(targets["dev3"].brightness - 0.4) < 1e-9
+        assert abs(targets["dev4"].brightness - 0.4) < 1e-9
+        assert targets["dev3"].temp == targets["dev1"].temp
