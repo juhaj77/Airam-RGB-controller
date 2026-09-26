@@ -16,6 +16,7 @@
 - [9. Running the tests](#9-running-the-tests)
 - [10. Development phases (status)](#10-development-phases-status)
 - [11. Known limitations / honest caveats](#11-known-limitations--honest-caveats)
+- [License](#license) (MIT)
     
 A Windows desktop application that turns **Airam SmartHome Smart PAR16 RGB GU10**
 Wi-Fi spotlights into a real-time, fully configurable music visualizer - controlled
@@ -39,7 +40,7 @@ work too - but they haven't been tested yet. If you try one, please open an issu
 report whether it worked!
 
 **Download:** a ready-to-run Windows build (no Python needed) is available on the
-[Releases page](https://github.com/juhaj77/Airam-RGB-controller/releases/latest) - see
+[Releases page](https://github.com/juhaj77/tuya-music-sync/releases/latest) - see
 [Installation](#3-installation).
 
 > **Beat Sync is the most interesting mode - and the default.** Of all the
@@ -72,12 +73,12 @@ Three demo videos show the app running against real hardware: **8 Airam spots**,
 ceiling and 4 along the walls. All are running in **Beat Sync** mode with **true white
 pulses** enabled.
 
-- [**Chase**](https://github.com/juhaj77/Airam-RGB-controller/releases/download/v1.0-demo/chase.mp4) -
+- [**Chase**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.0-demo/chase.mp4) -
   a rotating complementary color chasing around all the spots.
-- [**Group**](https://github.com/juhaj77/Airam-RGB-controller/releases/download/v1.0-demo/group.mp4) -
+- [**Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.0-demo/group.mp4) -
   the ceiling spots form one group and the wall spots another, with a complementary
   color effect between the two groups.
-- [**3 groups**](https://github.com/juhaj77/Airam-RGB-controller/releases/download/v1.0-demo/3_groups_demo.mp4) -
+- [**3 groups**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.0-demo/3_groups_demo.mp4) -
   the spots are split into **three groups**. Unlike the two videos above, this one was
   filmed on a **Xiaomi 14T in Pro mode with fixed white balance and fixed ISO**, so the
   camera isn't fighting the lights (see the note below) - it's a much more faithful
@@ -150,7 +151,7 @@ vain yhdellä lampulla kerrallaan. Mukana on myös erillinen sovellus valojen k�
 (värit, valkoinen valo, kiertävä valo, tunnelmavalaistus) ilman musiikkia. Muiden
 Tuya-pohjaisten RGB-lamppujen (esim. Airamin E27-älylamput) pitäisi toimia myös, mutta
 niitä ei ole vielä testattu. Valmis Windows-versio löytyy
-[Releases-sivulta](https://github.com/juhaj77/Airam-RGB-controller/releases/latest).
+[Releases-sivulta](https://github.com/juhaj77/tuya-music-sync/releases/latest).
 
 ---
 
@@ -224,7 +225,7 @@ See `DEVICE_NOTES.md` for the full breakdown, including the exact confirmed data
 ### Option A: prebuilt Windows build (no Python needed)
 
 Download the latest `AiramMusicLights-*-windows-x64.zip` from the
-[Releases page](https://github.com/juhaj77/Airam-RGB-controller/releases/latest), unzip
+[Releases page](https://github.com/juhaj77/tuya-music-sync/releases/latest), unzip
 it anywhere, and run the exes inside the folder:
 
 - `AiramMusicLights.exe` - the music visualizer (same as `python main.py`)
@@ -244,7 +245,8 @@ Requires **Python 3.10+** on Windows (tested with recent CPython 3.x; PySide6 an
 PyAudioWPatch both ship Windows wheels).
 
 ```powershell
-cd D:\projects\Airam-RGB-controller
+git clone https://github.com/juhaj77/tuya-music-sync.git
+cd tuya-music-sync
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -798,3 +800,9 @@ for between the music-analysis engine and the lamp-control layer.
   depending on how your Airam SmartHome account is set up - `DEVICE_NOTES.md` documents
   the exact snags hit during development (the "use the correct app" QR block, the
   "data center is suspended" cloud console error) and working fallbacks for both.
+
+---
+
+## License
+
+[MIT](LICENSE) - free to use, modify and share.
