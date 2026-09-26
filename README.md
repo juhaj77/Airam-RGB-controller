@@ -1,5 +1,21 @@
 # Airam Music Lights
 ![Airam Music Lights Demo](airam_demo.gif)
+
+**Contents**
+
+- 🇫🇮 [**Suomeksi** - lyhyt kuvaus suomeksi](#suomeksi)
+- [Demo videos](#demo-videos)
+- [1. How this works (architecture)](#1-how-this-works-architecture)
+- [2. Local control of the Airam bulbs - what's confirmed vs. assumed](#2-local-control-of-the-airam-bulbs---whats-confirmed-vs-assumed)
+- [3. Installation](#3-installation) (prebuilt Windows exe or from source)
+- [4. Phase 1: prove local control works on ONE bulb](#4-phase-1-prove-local-control-works-on-one-bulb-do-this-first)
+- [5. Running the full application](#5-running-the-full-application)
+- [6. Manual (no-music) control app](#6-manual-no-music-control-app)
+- [7. Why it feels smooth instead of "crude" like the Airam app](#7-why-it-feels-smooth-instead-of-crude-like-the-airam-app)
+- [8. Update rates - independently configurable](#8-update-rates---independently-configurable)
+- [9. Running the tests](#9-running-the-tests)
+- [10. Development phases (status)](#10-development-phases-status)
+- [11. Known limitations / honest caveats](#11-known-limitations--honest-caveats)
     
 A Windows desktop application that turns **Airam SmartHome Smart PAR16 RGB GU10**
 Wi-Fi spotlights into a real-time, fully configurable music visualizer - controlled
@@ -123,7 +139,7 @@ Device Manager -> your Wi-Fi adapter -> Power Management -> "Allow the computer 
 off this device to save power" (uncheck it) - that's a separate, adapter-level setting
 this API does not control.
 
-### Suomeksi
+## Suomeksi
 
 **Airam Music Lights** on Windows-sovellus, joka synkronoi **Airam SmartHome
 -älylamput** (Smart PAR16 RGB GU10 -kohdevalot) musiikkiin reaaliajassa: valot
