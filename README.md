@@ -15,6 +15,17 @@ bulb at a time and changes colors abruptly) with your own local FFT-based analys
 smooth attack/release color interpolation, and simultaneous, synchronized control of
 every lamp you own.
 
+**Compatibility:** developed and tested with **Airam SmartHome Smart PAR16 RGB GU10**
+spots. The app talks to the bulbs through tinytuya's generic Tuya bulb interface and
+nothing in it is specific to that model, so other Tuya-based RGB bulbs (e.g. **Airam
+SmartHome E27 RGB bulbs**, or other **Smart Life / Tuya-compatible** RGB bulbs) *should*
+work too - but they haven't been tested yet. If you try one, please open an issue and
+report whether it worked!
+
+**Download:** a ready-to-run Windows build (no Python needed) is available on the
+[Releases page](https://github.com/juhaj77/Airam-RGB-controller/releases/latest) - see
+[Installation](#3-installation).
+
 > **Beat Sync is the most interesting mode - and the default.** Of all the
 > color-mapping modes, it's the one that consistently feels the most visually alive in
 > practice - a percussive flash-and-decay on every beat, optionally with **dark pulses**
@@ -112,6 +123,19 @@ Device Manager -> your Wi-Fi adapter -> Power Management -> "Allow the computer 
 off this device to save power" (uncheck it) - that's a separate, adapter-level setting
 this API does not control.
 
+### Suomeksi
+
+**Airam Music Lights** on Windows-sovellus, joka synkronoi **Airam SmartHome
+-älylamput** (Smart PAR16 RGB GU10 -kohdevalot) musiikkiin reaaliajassa: valot
+vaihtavat väriä ja välähtävät musiikin tahdissa. Sovellus ohjaa lamppuja suoraan
+kotiverkon kautta ilman pilvipalvelua, ja se ohjaa kaikkia lamppuja yhtä aikaa ja
+synkronoidusti, toisin kuin Airam SmartHome -sovelluksen oma musiikkitila, joka toimii
+vain yhdellä lampulla kerrallaan. Mukana on myös erillinen sovellus valojen käsiohjaukseen
+(värit, valkoinen valo, kiertävä valo, tunnelmavalaistus) ilman musiikkia. Muiden
+Tuya-pohjaisten RGB-lamppujen (esim. Airamin E27-älylamput) pitäisi toimia myös, mutta
+niitä ei ole vielä testattu. Valmis Windows-versio löytyy
+[Releases-sivulta](https://github.com/juhaj77/Airam-RGB-controller/releases/latest).
+
 ---
 
 ## 1. How this works (architecture)
@@ -181,6 +205,25 @@ See `DEVICE_NOTES.md` for the full breakdown, including the exact confirmed data
 
 ## 3. Installation
 
+### Option A: prebuilt Windows build (no Python needed)
+
+Download the latest `AiramMusicLights-*-windows-x64.zip` from the
+[Releases page](https://github.com/juhaj77/Airam-RGB-controller/releases/latest), unzip
+it anywhere, and run the exes inside the folder:
+
+- `AiramMusicLights.exe` - the music visualizer (same as `python main.py`)
+- `AiramManualControl.exe` - the manual control app (same as `python manual_control.py`)
+- `AiramSetupWizard.exe` - the one-time local_key setup (same as
+  `python tools\setup_wizard.py`, see [4.2](#42-obtain-each-bulbs-local_key-one-time-via-the-tuya-cloud))
+
+Keep the exes in the unzipped folder - they share the libraries next to them. Windows
+SmartScreen may warn about an unrecognized app since the build isn't code-signed;
+choose **More info -> Run anyway**. The wizard writes tinytuya's `devices.json` (which
+contains your local keys) into the folder you run it from - delete it afterwards if you
+don't want the keys lying around.
+
+### Option B: run from source
+
 Requires **Python 3.10+** on Windows (tested with recent CPython 3.x; PySide6 and
 PyAudioWPatch both ship Windows wheels).
 
@@ -195,6 +238,13 @@ For running the automated tests too:
 
 ```powershell
 pip install -r requirements-dev.txt
+```
+
+To build the Option A exes yourself (output goes to `dist\AiramMusicLights\`):
+
+```powershell
+pip install pyinstaller
+pyinstaller airam_lights.spec
 ```
 
 ---

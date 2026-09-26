@@ -89,7 +89,7 @@ class DevicesTab(QWidget):
         root.addLayout(manage_row)
 
         self.hint_label = QLabel(
-            "New here? Run tools/setup_wizard.py once to pull local_key values from the "
+            "New here? Run tools/setup_wizard.py (or AiramSetupWizard.exe) once to pull local_key values from the "
             "Tuya cloud, or use 'Scan Network' to find IPs/device IDs and enter the key "
             "manually. See README.md for details."
         )

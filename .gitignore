@@ -23,3 +23,11 @@ logs/
 
 # Demo video - too large for GitHub's in-repo preview, hosted as a Release asset instead
 *.mp4
+
+# PyInstaller output
+build/
+dist/
+
+# tinytuya wizard output in the repo root - contains local keys / location, do not commit
+devices.json
+tuya-raw.json

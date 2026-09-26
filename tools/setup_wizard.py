@@ -36,10 +36,21 @@ def main() -> None:
     print(__doc__)
     input("Press Enter to launch the tinytuya setup wizard (Ctrl+C to cancel)...")
 
-    result = subprocess.run([sys.executable, "-m", "tinytuya", "wizard"])
-    if result.returncode != 0:
-        print("\nWizard exited with a non-zero status - see the output above for details.")
-        return
+    if getattr(sys, "frozen", False):
+        # Packaged .exe build: there's no separate Python interpreter to run
+        # `-m tinytuya` with (sys.executable is this exe itself), so run the
+        # wizard in-process instead.
+        from tinytuya import wizard
+        try:
+            wizard.wizard()
+        except Exception as e:
+            print(f"\nWizard failed: {e}")
+            return
+    else:
+        result = subprocess.run([sys.executable, "-m", "tinytuya", "wizard"])
+        if result.returncode != 0:
+            print("\nWizard exited with a non-zero status - see the output above for details.")
+            return
 
     devices_json = Path("devices.json")
     if not devices_json.exists():
@@ -93,3 +104,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    if getattr(sys, "frozen", False):
+        # Double-clicked .exe: keep the console window open so the result can be read.
+        input("\nPress Enter to close...")
