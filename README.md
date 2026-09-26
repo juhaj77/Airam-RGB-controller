@@ -1,9 +1,5 @@
 # Airam Music Lights
-<video src="3_groups_demo.mp4" autoplay loop muted playsinline></video>
-    
------------------------------------------------------------
-
-![Airam Music Lights Demo](docs/airam_demo.gif)
+![Airam Music Lights Demo](airam_demo.gif)
     
 A Windows desktop application that turns **Airam SmartHome Smart PAR16 RGB GU10**
 Wi-Fi spotlights into a real-time, fully configurable music visualizer - controlled
